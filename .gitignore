@@ -1,0 +1,15 @@
+# macOS artifacts
+.DS_Store
+
+# Frontend dependencies & builds
+node_modules/
+dist/
+build/
+.env
+.env.local
+
+# Python virtual environment & runtime caches
+.venv/
+venv/
+__pycache__/
+*.pyc
