@@ -18,7 +18,7 @@ const router = createMemoryRouter([
           theme="dark"
           toastOptions={{
             style: {
-              background: '#0d1b3e',
+              background: '#9daedb',
               border: '1px solid #c0392b',
               color: '#fff',
               fontFamily: '"JetBrains Mono", monospace',

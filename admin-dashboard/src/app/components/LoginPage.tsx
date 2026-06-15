@@ -16,6 +16,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [digitalId, setDigitalId] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [systemActive, setSystemActive] = useState(true);
   const [mfaMethod, setMfaMethod] = useState<MFAMethod>('otp');
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [step, setStep] = useState<AuthStep>('credentials');
@@ -141,55 +142,39 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     }
   };
 
-  const otpHint = MOCK_OTP;
+  // removed mock OTP display for production
 
   return (
-    <div className="min-h-screen w-full bg-[#0F172A] flex flex-col font-['Inter',_sans-serif] antialiased">
+    <div className="min-h-screen w-full bg-[#f3f6f9] flex flex-col font-['Inter',_sans-serif] antialiased">
 
       {/* Top bar */}
-      <header className="flex justify-between items-center bg-[#1E3A8A] border-b-4 border-[#DC2626] px-8 py-4 shrink-0">
+      <header className="flex justify-between items-center bg-[#08273f] border-b border-[#e6eef7] px-8 py-4 shrink-0">
         <div className="flex items-center gap-3">
           <Shield className="w-7 h-7 text-white" fill="white" />
           <span className="text-white text-xl font-bold tracking-[0.2em] uppercase">SentiNet — Relay Node Control Hub</span>
         </div>
-        <div className="flex items-center gap-3 font-['JetBrains_Mono',_monospace] text-xs text-blue-200">
-          <span className="w-2 h-2 bg-[#16A34A] inline-block border border-green-400"></span>
-          SYSTEM ONLINE
-          <span className="ml-4 text-slate-400">NODE: POC-CTRL-HUB-01</span>
+        <div className="flex items-center gap-3 text-xs">
+          <button
+            onClick={() => setSystemActive(s => !s)}
+            className={`flex items-center gap-2 px-3 py-1 rounded tracking-widest text-xs font-semibold transition bg-white`}>
+            <span className={`w-2 h-2 rounded-full inline-block ${systemActive ? 'bg-[#00c781]' : 'bg-[#ff6b6b]'}`}></span>
+            {systemActive ? 'SYSTEM ACTIVE' : 'ACTIVATE SYSTEM'}
+          </button>
         </div>
       </header>
 
       <div className="flex flex-1">
 
-        {/* Left — terminal log */}
-        <div className="hidden lg:flex w-[420px] shrink-0 flex-col border-r-2 border-[#334155] bg-[#0B1120]">
-          <div className="border-b-2 border-[#334155] px-5 py-3 text-xs font-bold uppercase tracking-widest text-[#64748B] font-['JetBrains_Mono',_monospace]">
-            // SYSTEM BOOT LOG
-          </div>
-          <div ref={logRef} className="flex-1 overflow-y-auto p-5 font-['JetBrains_Mono',_monospace] text-xs text-[#22D3EE] leading-6 space-y-0.5">
-            {logLines.map((line, i) => (
-              <div key={i} className={i === logLines.length - 1 ? 'text-white' : 'text-[#22D3EE] opacity-80'}>{line}</div>
-            ))}
-            <div className="inline-block w-2 h-4 bg-[#22D3EE] animate-pulse ml-1 align-middle" />
-          </div>
-          <div className="border-t-2 border-[#334155] p-4 text-[10px] font-['JetBrains_Mono',_monospace] text-[#475569] leading-5">
-            <div>ENCRYPTION: AES-256-GCM</div>
-            <div>BLOCKCHAIN: MULTICHAIN v2.3</div>
-            <div>PROTOCOL: BAYANIHAN SYNC v1.1</div>
-          </div>
-        </div>
-
         {/* Center — login form */}
-        <div className="flex-1 flex items-center justify-center p-8 bg-[#0F172A]">
+        <div className="flex-1 flex items-center justify-center p-8 bg-[#f3f6f9]">
           <div className="w-full max-w-[460px]">
 
             {/* Title block */}
-            <div className="border-2 border-[#1E3A8A] bg-[#1E3A8A] p-5 mb-0">
-              <div className="text-white font-bold uppercase tracking-[0.15em] text-base">Administrator Authentication</div>
-              <div className="text-blue-200 text-xs font-['JetBrains_Mono',_monospace] mt-1 tracking-widest">CLEARANCE LEVEL: OMEGA-5 REQUIRED</div>
+            <div className="border border-gray-200 bg-white p-5 mb-0 shadow-sm rounded-t">
+              <div className="text-[#0b2540] font-bold tracking-[0.02em] text-base">Administrator Authentication</div>
             </div>
 
-            <div className="border-2 border-t-0 border-[#334155] bg-[#131E2E] p-8">
+            <div className="border border-t-0 border-gray-100 bg-white p-8 shadow-sm rounded-b">
 
               {/* STEP 1 — Credentials */}
               {(step === 'credentials') && (
@@ -203,11 +188,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                       value={digitalId}
                       onChange={e => setDigitalId(e.target.value)}
                       placeholder="ADM-XXXX-XXXXX"
-                      className="w-full bg-[#0F172A] border-2 border-[#334155] text-white font-['JetBrains_Mono',_monospace] text-sm px-4 py-3 placeholder-[#334155] focus:outline-none focus:border-[#1E3A8A] tracking-widest"
+                      className="w-full bg-white border border-gray-200 text-[#0b2540] text-sm px-4 py-3 placeholder-[#9aa4b2] focus:outline-none focus:border-[#1a73e8] tracking-widest"
                       autoComplete="off"
                       spellCheck={false}
                     />
-                    <div className="text-[10px] text-[#475569] font-['JetBrains_Mono',_monospace] mt-1">HINT: ADM-7734-ALPHA</div>
+                    <div className="text-[10px] text-[#475569] font-['JetBrains_Mono',_monospace] mt-1"></div>
                   </div>
 
                   <div>
@@ -220,7 +205,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                         value={password}
                         onChange={e => setPassword(e.target.value)}
                         placeholder="••••••••••••••"
-                        className="w-full bg-[#0F172A] border-2 border-[#334155] text-white font-['JetBrains_Mono',_monospace] text-sm px-4 py-3 pr-12 placeholder-[#334155] focus:outline-none focus:border-[#1E3A8A]"
+                        className="w-full bg-white border border-gray-200 text-[#0b2540] text-sm px-4 py-3 pr-12 placeholder-[#9aa4b2] focus:outline-none focus:border-[#1a73e8]"
                       />
                       <button
                         type="button"
@@ -230,7 +215,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
-                    <div className="text-[10px] text-[#475569] font-['JetBrains_Mono',_monospace] mt-1">HINT: SentiNet@2049</div>
+                    <div className="text-[10px] text-[#475569] font-['JetBrains_Mono',_monospace] mt-1"></div>
                   </div>
 
                   {credError && (
@@ -242,10 +227,10 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
                   <button
                     type="submit"
-                    className="w-full bg-[#1E3A8A] hover:bg-[#1e40af] border-2 border-[#1E3A8A] text-white font-bold uppercase tracking-[0.2em] py-4 flex items-center justify-center gap-3 text-sm transition-none active:bg-[#172554]"
+                    className="w-full bg-[#1a73e8] hover:bg-[#1667d0] border border-[#1a73e8] text-white font-semibold tracking-[0.02em] py-3 flex items-center justify-center gap-3 text-sm transition rounded"
                   >
                     <ChevronRight className="w-5 h-5" />
-                    AUTHENTICATE
+                    Authenticate
                   </button>
                 </form>
               )}
@@ -267,10 +252,10 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                       <button
                         key={m.id}
                         onClick={() => { setMfaMethod(m.id); setMfaError(''); setOtp(['','','','','','']); }}
-                        className={`flex flex-col items-center gap-2 py-4 px-2 border-2 text-xs font-bold uppercase tracking-widest transition-none ${
+                        className={`flex flex-col items-center gap-2 py-4 px-2 border-2 text-xs font-semibold tracking-widest transition ${
                           mfaMethod === m.id
-                            ? 'border-[#1E3A8A] bg-[#1E3A8A] text-white'
-                            : 'border-[#334155] bg-[#0F172A] text-[#64748B] hover:border-[#475569] hover:text-[#94A3B8]'
+                            ? 'border-[#1a73e8] bg-[#eaf4ff] text-[#0b2540]'
+                            : 'border-gray-200 bg-white text-[#475569] hover:border-gray-300 hover:text-[#0b2540]'
                         }`}
                       >
                         {m.icon}
@@ -282,7 +267,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                   {/* OTP input */}
                   {mfaMethod === 'otp' && (
                     <div className="space-y-4">
-                      <div className="text-[#94A3B8] text-xs font-['JetBrains_Mono',_monospace] uppercase tracking-widest">
+                      <div className="text-[#475569] text-xs uppercase tracking-widest">
                         Enter 6-digit OTP sent to registered device
                       </div>
                       <div className="flex gap-3 justify-center">
@@ -296,22 +281,20 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                             value={d}
                             onChange={e => handleOtpChange(e.target.value, i)}
                             onKeyDown={e => handleOtpKeyDown(e, i)}
-                            className="w-12 h-14 bg-[#0F172A] border-2 border-[#334155] text-white text-center font-['JetBrains_Mono',_monospace] text-xl focus:outline-none focus:border-[#1E3A8A]"
+                            className="w-12 h-14 bg-white border border-gray-200 text-[#0b2540] text-center font-['JetBrains_Mono',_monospace] text-xl focus:outline-none focus:border-[#1a73e8]"
                           />
                         ))}
                       </div>
-                      <div className="text-[10px] text-[#475569] font-['JetBrains_Mono',_monospace]">MOCK OTP: {otpHint}</div>
                     </div>
                   )}
 
                   {/* Fingerprint mock */}
                   {mfaMethod === 'fingerprint' && (
                     <div className="flex flex-col items-center gap-4 py-4">
-                      <div className="w-28 h-28 border-2 border-[#334155] bg-[#0F172A] flex items-center justify-center relative">
-                        <Fingerprint className="w-16 h-16 text-[#1E3A8A]" />
-                        <div className="absolute inset-0 border-2 border-[#22D3EE] opacity-20 animate-ping" />
+                      <div className="w-28 h-28 border border-gray-100 bg-white flex items-center justify-center relative rounded">
+                        <Fingerprint className="w-16 h-16 text-[#0b2540]" />
                       </div>
-                      <div className="text-[#94A3B8] text-xs font-['JetBrains_Mono',_monospace] uppercase tracking-widest text-center">
+                      <div className="text-[#475569] text-xs uppercase tracking-widest text-center">
                         Place registered finger on scanner<br />
                         <span className="text-[#475569] text-[10px]">MOCK: click verify to simulate</span>
                       </div>
@@ -321,13 +304,13 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                   {/* Face ID mock */}
                   {mfaMethod === 'face' && (
                     <div className="flex flex-col items-center gap-4 py-4">
-                      <div className="w-28 h-28 border-2 border-[#334155] bg-[#0F172A] flex items-center justify-center relative overflow-hidden">
-                        <Scan className="w-16 h-16 text-[#1E3A8A]" />
+                      <div className="w-28 h-28 border border-gray-100 bg-white flex items-center justify-center relative overflow-hidden rounded">
+                        <Scan className="w-16 h-16 text-[#0b2540]" />
                         {/* scan line animation */}
                         <div className="absolute left-0 right-0 h-0.5 bg-[#22D3EE] opacity-70"
                           style={{ animation: 'scanline 2s linear infinite', top: '0%' }} />
                       </div>
-                      <div className="text-[#94A3B8] text-xs font-['JetBrains_Mono',_monospace] uppercase tracking-widest text-center">
+                      <div className="text-[#475569] text-xs uppercase tracking-widest text-center">
                         Look directly at the camera<br />
                         <span className="text-[#475569] text-[10px]">MOCK: click verify to simulate</span>
                       </div>
@@ -343,10 +326,10 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
                   <button
                     onClick={handleMfaSubmit}
-                    className="w-full bg-[#1E3A8A] hover:bg-[#1e40af] border-2 border-[#1E3A8A] text-white font-bold uppercase tracking-[0.2em] py-4 flex items-center justify-center gap-3 text-sm transition-none active:bg-[#172554]"
+                    className="w-full bg-[#1a73e8] hover:bg-[#1667d0] border border-[#1a73e8] text-white font-semibold tracking-[0.02em] py-3 flex items-center justify-center gap-3 text-sm transition rounded"
                   >
                     <Shield className="w-5 h-5" />
-                    VERIFY &amp; ENTER
+                    Verify &amp; Enter
                   </button>
 
                   <button
@@ -387,39 +370,14 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             </div>
 
             {/* Footer strip */}
-            <div className="border-2 border-t-0 border-[#334155] bg-[#0B1120] px-5 py-3 flex justify-between items-center">
-              <span className="text-[#334155] text-[10px] font-['JetBrains_Mono',_monospace] uppercase tracking-widest">CLASSIFIED // AUTHORIZED USE ONLY</span>
-              <span className="text-[#334155] text-[10px] font-['JetBrains_Mono',_monospace]">POC-v2.4.9</span>
+            <div className="border border-t-0 border-gray-100 bg-white px-5 py-3 flex justify-between items-center">
+              <span className="text-[#475569] text-[10px] font-['JetBrains_Mono',_monospace] uppercase tracking-widest">CLASSIFIED // AUTHORIZED USE ONLY</span>
+              <span className="text-[#475569] text-[10px] font-['JetBrains_Mono',_monospace]">POC-v2.4.9</span>
             </div>
           </div>
         </div>
 
-        {/* Right — security status panel */}
-        <div className="hidden xl:flex w-[240px] shrink-0 flex-col border-l-2 border-[#334155] bg-[#0B1120]">
-          <div className="border-b-2 border-[#334155] px-5 py-3 text-xs font-bold uppercase tracking-widest text-[#64748B] font-['JetBrains_Mono',_monospace]">
-            // SEC STATUS
-          </div>
-          <div className="flex-1 p-5 space-y-5 font-['JetBrains_Mono',_monospace] text-xs">
-            {[
-              { label: 'FIREWALL', status: 'ACTIVE', ok: true },
-              { label: 'IDS ENGINE', status: 'RUNNING', ok: true },
-              { label: 'CHAIN SYNC', status: 'IN SYNC', ok: true },
-              { label: 'VPN TUNNEL', status: 'ESTABLISHED', ok: true },
-              { label: 'THREAT FEED', status: 'NOMINAL', ok: true },
-              { label: 'ROGUE AP', status: '0 DETECTED', ok: true },
-            ].map(item => (
-              <div key={item.label} className="flex justify-between items-center border-b border-[#1E293B] pb-3">
-                <span className="text-[#475569] uppercase tracking-widest">{item.label}</span>
-                <span className={`text-[10px] font-bold ${item.ok ? 'text-[#16A34A]' : 'text-[#DC2626]'}`}>{item.status}</span>
-              </div>
-            ))}
-          </div>
-          <div className="border-t-2 border-[#334155] p-5">
-            <div className="text-[#DC2626] text-[10px] uppercase tracking-widest font-bold mb-1">LAST BREACH ATTEMPT</div>
-            <div className="text-[#475569] text-[10px]">14:02:37 — IP 10.0.0.99</div>
-            <div className="text-[#475569] text-[10px]">ARP SPOOF — BLOCKED</div>
-          </div>
-        </div>
+        {/* Right — (SEC STATUS removed) */}
 
       </div>
 

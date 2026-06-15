@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router';
 import {
   Shield, Radio, Clock, Activity, Database,
   TrendingUp, Settings, ArrowLeft, Users, AlertTriangle,
-  CheckCircle, XCircle, RefreshCw, Plus, Trash2, Cpu,
+  CheckCircle, XCircle, RefreshCw, Cpu,
   Wifi, Server, Link, Award, BarChart2, Filter
 } from 'lucide-react';
 import {
@@ -13,7 +13,7 @@ import {
 import { Power } from 'lucide-react';
 import { useTrayConnection } from '../hooks/useTrayConnection';
 
-type Tab = 'dashboard' | 'analytics' | 'whitelist' | 'diagnostics' | 'settings';
+type Tab = 'dashboard' | 'analytics' | 'diagnostics' | 'settings';
 
 /* ── mock data generators ── */
 function gen7DayData() {
@@ -35,18 +35,7 @@ function gen24HData() {
   }));
 }
 
-interface WhitelistEntry {
-  id: number;
-  type: 'MAC' | 'IP';
-  value: string;
-  label: string;
-  addedAt: string;
-}
-
-const INITIAL_WHITELIST: WhitelistEntry[] = [
-  { id: 1, type: 'MAC', value: 'B8:27:EB:4F:92:D3', label: 'Home Printer (HP LaserJet)', addedAt: '2026-06-08 10:14' },
-  { id: 2, type: 'IP',  value: '192.168.1.105',     label: 'Personal Laptop',            addedAt: '2026-06-07 09:32' },
-];
+// Whitelist feature removed from agent dashboard
 
 interface DaemonService {
   id: string;
@@ -69,7 +58,7 @@ const INITIAL_DAEMONS: DaemonService[] = [
 function CyberTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div style={{ background: '#0d1b3e', border: '1px solid #1e3a5f', padding: '8px 12px', fontSize: 10, fontFamily: 'monospace' }}>
+    <div style={{ background: '#21325a', border: '1px solid #1e3a5f', padding: '8px 12px', fontSize: 10, fontFamily: 'monospace' }}>
       <p style={{ color: '#8899bb', marginBottom: 4 }}>{label}</p>
       {payload.map((p: any) => (
         <p key={p.dataKey} style={{ color: p.color }}>
@@ -105,12 +94,7 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
   const chartData = analyticsRange === '7d' ? chartData7d : chartData24h;
   const xKey = analyticsRange === '7d' ? 'day' : 'hour';
 
-  /* whitelist */
-  const [whitelist, setWhitelist] = useState<WhitelistEntry[]>(INITIAL_WHITELIST);
-  const [wlType, setWlType] = useState<'MAC' | 'IP'>('MAC');
-  const [wlValue, setWlValue] = useState('');
-  const [wlLabel, setWlLabel] = useState('');
-  const [wlError, setWlError] = useState('');
+  /* whitelist removed */
 
   /* daemons */
   const [daemons, setDaemons] = useState<DaemonService[]>(INITIAL_DAEMONS);
@@ -174,32 +158,7 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
   ];
   const eLogs = live && tray.events && tray.events.length ? tray.events : detectionLogs;
 
-  /* whitelist handlers */
-  function addWhitelist() {
-    const v = wlValue.trim();
-    const l = wlLabel.trim();
-    if (!v) { setWlError('Value is required'); return; }
-    if (wlType === 'MAC' && !/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/.test(v)) {
-      setWlError('Invalid MAC format (XX:XX:XX:XX:XX:XX)');
-      return;
-    }
-    if (wlType === 'IP' && !/^(\d{1,3}\.){3}\d{1,3}$/.test(v)) {
-      setWlError('Invalid IP format');
-      return;
-    }
-    if (whitelist.find(e => e.value.toLowerCase() === v.toLowerCase())) {
-      setWlError('Entry already exists');
-      return;
-    }
-    const now = new Date();
-    const ts = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    setWhitelist(prev => [...prev, { id: Date.now(), type: wlType, value: v, label: l || v, addedAt: ts }]);
-    setWlValue(''); setWlLabel(''); setWlError('');
-  }
-
-  function removeWhitelist(id: number) {
-    setWhitelist(prev => prev.filter(e => e.id !== id));
-  }
+  /* whitelist handlers removed */
 
   /* daemon restart */
   function restartDaemon(id: string) {
@@ -226,7 +185,6 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
   const TABS: { id: Tab; label: string; Icon: any }[] = [
     { id: 'dashboard',   label: 'DASHBOARD',   Icon: Activity },
     { id: 'analytics',   label: 'ANALYTICS',   Icon: BarChart2 },
-    { id: 'whitelist',   label: 'WHITELIST',   Icon: Filter },
     { id: 'diagnostics', label: 'DIAGNOSTICS', Icon: Cpu },
     { id: 'settings',    label: 'SETTINGS',    Icon: Settings },
   ];
@@ -604,132 +562,7 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
         </div>
       )}
 
-      {/* ── WHITELIST tab ── */}
-      {activeTab === 'whitelist' && (
-        <div className="flex-1 p-5 space-y-5 overflow-auto max-w-[1800px] mx-auto w-full">
-          <div>
-            <h2 className="text-[#0d1b3e] text-sm tracking-widest font-bold uppercase">Local Exception / Whitelist Manager</h2>
-            <p className="text-[#888] text-[10px] tracking-wider mt-0.5">Manually unblock MAC addresses or IPs flagged as false positives</p>
-          </div>
-
-          {/* Add form */}
-          <div className="bg-white border border-[#cccccc]">
-            <div className="px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5] flex items-center gap-2">
-              <Plus className="w-4 h-4 text-[#0d1b3e]" />
-              <span className="text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold">Add Exception</span>
-            </div>
-            <div className="p-5">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                {/* Type toggle */}
-                <div>
-                  <label className="text-[#888] text-[9px] tracking-widest uppercase block mb-1.5">Type</label>
-                  <div className="flex border border-[#cccccc]">
-                    {(['MAC', 'IP'] as const).map(t => (
-                      <button
-                        key={t}
-                        onClick={() => { setWlType(t); setWlError(''); }}
-                        className={`flex-1 py-2 text-[10px] tracking-widest uppercase transition ${
-                          wlType === t ? 'bg-[#0d1b3e] text-white' : 'bg-white text-[#555] hover:bg-[#f0f0f0]'
-                        }`}
-                      >
-                        {t}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Value */}
-                <div>
-                  <label className="text-[#888] text-[9px] tracking-widest uppercase block mb-1.5">
-                    {wlType === 'MAC' ? 'MAC Address' : 'IP Address'}
-                  </label>
-                  <input
-                    value={wlValue}
-                    onChange={e => { setWlValue(e.target.value); setWlError(''); }}
-                    placeholder={wlType === 'MAC' ? 'AA:BB:CC:DD:EE:FF' : '192.168.1.x'}
-                    className="w-full border border-[#cccccc] px-3 py-2 text-[11px] font-mono tracking-wider focus:outline-none focus:border-[#1a4fd6] bg-white"
-                  />
-                </div>
-
-                {/* Label */}
-                <div>
-                  <label className="text-[#888] text-[9px] tracking-widest uppercase block mb-1.5">Label (optional)</label>
-                  <input
-                    value={wlLabel}
-                    onChange={e => setWlLabel(e.target.value)}
-                    placeholder="e.g. Home Printer"
-                    className="w-full border border-[#cccccc] px-3 py-2 text-[11px] tracking-wider focus:outline-none focus:border-[#1a4fd6] bg-white"
-                  />
-                </div>
-
-                {/* Add button */}
-                <div className="flex flex-col justify-end">
-                  <button
-                    onClick={addWhitelist}
-                    className="bg-[#0d1b3e] text-white text-[10px] tracking-widest uppercase px-4 py-2 hover:bg-[#1a2f5e] transition flex items-center justify-center gap-2"
-                  >
-                    <Plus className="w-3.5 h-3.5" /> ADD TO WHITELIST
-                  </button>
-                </div>
-              </div>
-              {wlError && <p className="text-[#c0392b] text-[10px] tracking-wider mt-2">{wlError}</p>}
-            </div>
-          </div>
-
-          {/* Whitelist table */}
-          <div className="bg-white border border-[#cccccc]">
-            <div className="px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5]">
-              <span className="text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold">Whitelisted Exceptions ({whitelist.length})</span>
-            </div>
-            {whitelist.length === 0 ? (
-              <div className="p-10 text-center text-[#888] text-[11px] tracking-widest">No exceptions added yet</div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
-                  <thead>
-                    <tr className="border-b border-[#e0e0e0] bg-[#fafafa]">
-                      {['TYPE', 'VALUE', 'LABEL', 'ADDED', 'ACTION'].map(h => (
-                        <th key={h} className="px-4 py-2.5 text-left text-[#555] tracking-widest font-normal text-[10px]">{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {whitelist.map(entry => (
-                      <tr key={entry.id} className="border-b border-[#f0f0f0] hover:bg-[#f0f7ff] transition-colors">
-                        <td className="px-4 py-3">
-                          <span className={`text-[9px] tracking-widest px-2 py-0.5 font-bold ${
-                            entry.type === 'MAC'
-                              ? 'bg-[#0d1b3e] text-white'
-                              : 'border border-[#1a4fd6] text-[#1a4fd6]'
-                          }`}>{entry.type}</span>
-                        </td>
-                        <td className="px-4 py-3 text-[#111] text-[10px] font-mono tracking-wider">{entry.value}</td>
-                        <td className="px-4 py-3 text-[#555] text-[10px] tracking-wider">{entry.label}</td>
-                        <td className="px-4 py-3 text-[#888] text-[10px] font-mono">{entry.addedAt}</td>
-                        <td className="px-4 py-3">
-                          <button
-                            onClick={() => removeWhitelist(entry.id)}
-                            className="flex items-center gap-1 text-[#c0392b] hover:text-[#a02020] text-[10px] tracking-wider transition"
-                          >
-                            <Trash2 className="w-3 h-3" /> REMOVE
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div className="bg-[#fff8e1] border border-[#f59e0b]/40 p-4 flex gap-3">
-            <AlertTriangle className="w-4 h-4 text-[#f59e0b] shrink-0 mt-0.5" />
-            <p className="text-[#555] text-[10px] tracking-wider leading-relaxed">
-              Whitelisted entries will <strong>not be blocked</strong> by SentiNet even if flagged by Tier-1 or Tier-2 detection. Only add entries you have personally verified as safe. This list is local to your device and not shared with the network.
-            </p>
-          </div>
-        </div>
-      )}
+      {/* Whitelist removed */}
 
       {/* ── DIAGNOSTICS tab ── */}
       {activeTab === 'diagnostics' && (

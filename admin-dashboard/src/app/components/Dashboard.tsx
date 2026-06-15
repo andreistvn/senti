@@ -313,7 +313,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   ];
 
   return (
-    <div className="min-h-screen w-full bg-[#E2E8F0] flex flex-col p-4 font-['Inter',_sans-serif] text-slate-900 gap-4 box-border antialiased">
+    <div className="min-h-screen w-full bg-[#e8eaed] flex flex-col p-4 font-['Inter',_sans-serif] text-slate-900 gap-4 box-border antialiased">
       {/* Toaster for push notifications */}
       <Toaster position="top-right" />
 
@@ -321,42 +321,45 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
       {/* Floating scroll buttons */}
       <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
-        <button onClick={() => pageTopRef.current?.scrollIntoView({ behavior: 'smooth' })} className="w-11 h-11 bg-[#1E3A8A] border-2 border-[#334155] text-white flex items-center justify-center hover:bg-[#1e40af] transition-none" title="Scroll to Top">
+        <button onClick={() => pageTopRef.current?.scrollIntoView({ behavior: 'smooth' })} className="w-11 h-11 bg-[#0d1b3e] border border-[#cccccc] text-white flex items-center justify-center hover:bg-[#102245] transition" title="Scroll to Top">
           <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><polyline points="18 15 12 9 6 15"/></svg>
         </button>
-        <button onClick={() => pageBottomRef.current?.scrollIntoView({ behavior: 'smooth' })} className="w-11 h-11 bg-[#1E3A8A] border-2 border-[#334155] text-white flex items-center justify-center hover:bg-[#1e40af] transition-none" title="Scroll to Bottom">
+        <button onClick={() => pageBottomRef.current?.scrollIntoView({ behavior: 'smooth' })} className="w-11 h-11 bg-[#0d1b3e] border border-[#cccccc] text-white flex items-center justify-center hover:bg-[#102245] transition" title="Scroll to Bottom">
           <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
       </div>
 
       {/* Header */}
-      <header className="flex justify-between items-center bg-[#1E3A8A] text-white p-4 border-2 border-[#334155] uppercase tracking-wide font-bold shrink-0">
+      <header className="bg-[#0d1b3e] border-b-2 border-[#c0392b] px-6 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <Shield className="w-6 h-6" fill="white" />
-          <span className="text-xl tracking-widest">Relay Node: POC-Control-Hub</span>
+          <Shield className="w-5 h-5 text-white" />
+          <span className="text-white tracking-widest text-sm font-bold">Relay Node: POC-Control-Hub</span>
         </div>
-        <div className="flex items-center gap-8 text-sm font-['JetBrains_Mono',_monospace]">
-          <span className="flex items-center gap-2"><div className="w-3 h-3 bg-[#16A34A] border border-[#334155]" />MultiChain: Active</span>
-          <span className="flex items-center gap-2"><div className="w-3 h-3 bg-[#16A34A] border border-[#334155]" />WebSocket: Listening</span>
+        <div className="flex items-center gap-6 text-xs text-[#8899bb]">
+          <span className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-sm bg-[#00aa55]" />MultiChain: Active</span>
+          <span className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-sm bg-[#00aa55]" />WebSocket: Listening</span>
           <span className="flex items-center gap-2"><Activity className="w-4 h-4" />Sync Latency: {telemetry.latency}ms</span>
         </div>
       </header>
 
       {/* Tab Bar */}
-      <div className="flex border-2 border-[#334155] shrink-0 bg-[#F1F5F9]">
-        {TABS.map((tab, i) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`flex items-center gap-2 px-6 py-3 text-sm font-bold uppercase tracking-widest border-r-2 border-[#334155] transition-none ${activeTab === tab.key ? 'bg-[#1E3A8A] text-white' : 'bg-transparent text-[#475569] hover:bg-[#E2E8F0]'}`}
-          >
-            {tab.icon}{tab.label}
+      <div className="bg-white border-b border-[#cccccc] flex items-center justify-between shrink-0">
+        <div className="flex">
+          {TABS.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`flex items-center gap-2 px-5 py-3 text-[10px] tracking-widest uppercase border-r border-[#cccccc] transition ${activeTab === tab.key ? 'bg-[#0d1b3e] text-white' : 'bg-white text-[#555] hover:bg-[#f0f0f0]'}`}
+            >
+              {tab.icon}{tab.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex">
+          <button onClick={onLogout} className="flex items-center gap-2 px-6 py-3 text-[10px] tracking-widest text-[#c0392b] hover:bg-red-50 border-l border-[#cccccc] uppercase transition">
+            <LogOut className="w-4 h-4" />Logout
           </button>
-        ))}
-        <div className="flex-1" />
-        <button onClick={onLogout} className="flex items-center gap-2 px-6 py-3 text-sm font-bold uppercase tracking-widest text-[#DC2626] hover:bg-[#DC2626] hover:text-white border-l-2 border-[#334155] transition-none">
-          <LogOut className="w-4 h-4" />Logout
-        </button>
+        </div>
       </div>
 
       {/* ── Analytics Tab ── */}
@@ -372,12 +375,12 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       {/* ── Settings Tab ── */}
       {activeTab === 'settings' && (
         <div className="flex flex-col gap-4">
-          <section className="border-2 border-[#334155] bg-white">
-            <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><User className="w-5 h-5" />Admin Profile</div>
+          <section className="bg-white border border-[#cccccc]">
+            <div className="bg-white border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><User className="w-5 h-5" />Admin Profile</div>
             <div className="p-6 grid grid-cols-2 gap-6 font-['JetBrains_Mono',_monospace] text-sm">
               {[
                 { label:'Digital ID',       value:'ADM-7734-ALPHA' },
-                { label:'Clearance Level',  value:'OMEGA-5' },
+                
                 { label:'Role',             value:'Network Security Administrator' },
                 { label:'Last Login',       value:'2049-03-14  08:42:11 UTC' },
                 { label:'Session Token',    value:'eyJ0eXAiOiJKV1QiLCJhb...' },
@@ -391,8 +394,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
             </div>
           </section>
           <div className="grid grid-cols-2 gap-4">
-            <section className="border-2 border-[#334155] bg-white">
-              <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><Wifi className="w-5 h-5" />Network Configuration</div>
+            <section className="bg-white border border-[#cccccc]">
+              <div className="bg-white border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><Wifi className="w-5 h-5" />Network Configuration</div>
               <div className="p-5 space-y-4 font-['JetBrains_Mono',_monospace] text-sm">
                 {[
                   { label:'Control Hub IP',     value:'192.168.10.1' },
@@ -404,13 +407,13 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                 ].map(row => (
                   <div key={row.label} className="flex justify-between border-b border-[#E2E8F0] pb-3">
                     <span className="text-[#64748B] uppercase tracking-widest text-xs self-center">{row.label}</span>
-                    <input className="bg-[#F8FAFC] border-2 border-[#E2E8F0] px-3 py-1 text-[#0F172A] font-bold text-xs w-44 focus:outline-none focus:border-[#1E3A8A]" defaultValue={row.value} />
+                    <input className="bg-[#F8FAFC] border border-[#E2E8F0] px-3 py-1 text-[#0F172A] font-bold text-xs w-44 focus:outline-none focus:border-[#1a73e8]" defaultValue={row.value} />
                   </div>
                 ))}
               </div>
             </section>
-            <section className="border-2 border-[#334155] bg-white">
-              <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><Bell className="w-5 h-5" />Security &amp; Alerts</div>
+            <section className="border border-[#cccccc] bg-white">
+              <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><Bell className="w-5 h-5" />Security &amp; Alerts</div>
               <div className="p-5 space-y-4 font-['JetBrains_Mono',_monospace] text-sm">
                 {[
                   { label:'ARP Spoof Detection',      on:true  },
@@ -423,8 +426,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               </div>
             </section>
           </div>
-          <section className="border-2 border-[#334155] bg-white">
-            <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><Server className="w-5 h-5" />System Information</div>
+          <section className="border border-[#cccccc] bg-white">
+            <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><Server className="w-5 h-5" />System Information</div>
             <div className="p-5 grid grid-cols-4 gap-4 font-['JetBrains_Mono',_monospace] text-sm">
               {[
                 { label:'POC Version',     value:'v2.4.9' },
@@ -436,20 +439,20 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                 { label:'Active Sessions', value:'1 (ADM-7734)' },
                 { label:'Chain Height',    value:`#${String(blockchainMetrics.blockHeight).padStart(8,'0')}` },
               ].map(row => (
-                <div key={row.label} className="border-2 border-[#E2E8F0] p-4 flex flex-col gap-1">
+                <div key={row.label} className="border border-[#E2E8F0] p-4 flex flex-col gap-1">
                   <span className="text-[#94A3B8] text-[10px] uppercase tracking-widest">{row.label}</span>
                   <span className="text-[#0F172A] font-bold text-xs">{row.value}</span>
                 </div>
               ))}
             </div>
           </section>
-          <section className="border-2 border-[#DC2626] bg-white">
-            <div className="bg-[#DC2626] border-b-2 border-[#DC2626] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-white"><Lock className="w-5 h-5" />Danger Zone</div>
+          <section className="border border-[#FCA5A5] bg-white">
+            <div className="bg-[#fee2e2] border-b border-[#FCA5A5] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#7f1d1d]"><Lock className="w-5 h-5" />Danger Zone</div>
             <div className="p-5 flex flex-wrap gap-4">
               {['Revoke All Sessions','Reset Agent Registry','Wipe Blockchain Cache','Factory Reset Node'].map(action => (
-                <button key={action} className="border-2 border-[#DC2626] text-[#DC2626] px-5 py-3 text-xs font-bold uppercase tracking-widest hover:bg-[#DC2626] hover:text-white transition-none font-['JetBrains_Mono',_monospace]">{action}</button>
+                <button key={action} className="border border-[#DC2626] text-[#DC2626] px-5 py-3 text-xs font-bold uppercase tracking-widest hover:bg-[#DC2626] hover:text-white transition font-['JetBrains_Mono',_monospace]">{action}</button>
               ))}
-              <button onClick={onLogout} className="border-2 border-[#DC2626] bg-[#DC2626] text-white px-5 py-3 text-xs font-bold uppercase tracking-widest hover:bg-[#b91c1c] transition-none font-['JetBrains_Mono',_monospace] flex items-center gap-2 ml-auto">
+              <button onClick={onLogout} className="border border-[#DC2626] bg-[#DC2626] text-white px-5 py-3 text-xs font-bold uppercase tracking-widest hover:bg-[#b91c1c] transition font-['JetBrains_Mono',_monospace] flex items-center gap-2 ml-auto">
                 <LogOut className="w-4 h-4" />Logout &amp; End Session
               </button>
             </div>
@@ -461,8 +464,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       {activeTab === 'dashboard' && <>
 
         {/* Agent Status Grid */}
-        <section className="shrink-0 border-2 border-[#334155] bg-white flex flex-col" style={{ minHeight: 200 }}>
-          <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest text-[#0F172A] flex items-center gap-2 shrink-0">
+        <section className="shrink-0 border border-[#cccccc] bg-white flex flex-col" style={{ minHeight: 200 }}>
+          <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest text-[#0F172A] flex items-center gap-2 shrink-0">
             <Shield className="w-5 h-5" />Agent Status Overview
             <span className="ml-auto font-['JetBrains_Mono',_monospace] text-[#16A34A] text-xs">
               {agents.filter(a => a.state === 'PROTECTED').length}/{agents.length} PROTECTED
@@ -470,37 +473,37 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           </div>
           <div className="overflow-auto">
             <table className="w-full text-left border-collapse text-sm">
-              <thead className="bg-[#F8FAFC] border-b-2 border-[#334155] sticky top-0 z-10 font-bold uppercase tracking-widest text-xs">
+              <thead className="bg-[#F8FAFC] border-b border-[#e2e8f0] sticky top-0 z-10 font-bold uppercase tracking-widest text-xs">
                 <tr>
-                  <th className="p-3 border-r-2 border-[#334155] text-[#0F172A]">ID</th>
-                  <th className="p-3 border-r-2 border-[#334155] text-[#0F172A]">Name</th>
-                  <th className="p-3 border-r-2 border-[#334155] text-[#0F172A]">IP Address</th>
-                  <th className="p-3 border-r-2 border-[#334155] text-[#0F172A]">MAC Address</th>
-                  <th className="p-3 border-r-2 border-[#334155] text-[#0F172A]">CPU / RAM</th>
+                  <th className="p-3 border-r border-[#e2e8f0] text-[#0F172A]">ID</th>
+                  <th className="p-3 border-r border-[#e2e8f0] text-[#0F172A]">Name</th>
+                  <th className="p-3 border-r border-[#e2e8f0] text-[#0F172A]">IP Address</th>
+                  <th className="p-3 border-r border-[#e2e8f0] text-[#0F172A]">MAC Address</th>
+                  <th className="p-3 border-r border-[#e2e8f0] text-[#0F172A]">CPU / RAM</th>
                   <th className="p-3 text-[#0F172A]">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {agents.map(agent => (
-                  <tr key={agent.id} className="border-b border-[#334155] hover:bg-slate-50 transition-none">
-                    <td className="p-3 border-r-2 border-[#334155] font-['JetBrains_Mono',_monospace] font-bold opacity-60">{agent.id}</td>
-                    <td className="p-3 border-r-2 border-[#334155] font-bold uppercase tracking-tight">{agent.name}</td>
-                    <td className="p-3 border-r-2 border-[#334155] font-['JetBrains_Mono',_monospace]">{agent.ip}</td>
-                    <td className="p-3 border-r-2 border-[#334155] font-['JetBrains_Mono',_monospace]">{agent.mac}</td>
-                    <td className="p-3 border-r-2 border-[#334155]">
+                  <tr key={agent.id} className="border-b border-[#e2e8f0] hover:bg-slate-50 transition">
+                    <td className="p-3 border-r border-[#e2e8f0] font-['JetBrains_Mono',_monospace] font-bold opacity-60">{agent.id}</td>
+                    <td className="p-3 border-r border-[#e2e8f0] font-bold uppercase tracking-tight">{agent.name}</td>
+                    <td className="p-3 border-r border-[#e2e8f0] font-['JetBrains_Mono',_monospace]">{agent.ip}</td>
+                    <td className="p-3 border-r border-[#e2e8f0] font-['JetBrains_Mono',_monospace]">{agent.mac}</td>
+                    <td className="p-3 border-r border-[#e2e8f0]">
                       <div className="flex flex-col gap-1 w-36">
                         <div className="flex justify-between text-[9px] font-bold uppercase">
                           <span>CPU</span>
                           <span className={`font-['JetBrains_Mono',_monospace] ${agent.cpu > 70 ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>{agent.cpu}%</span>
                         </div>
-                        <div className="h-1.5 border border-[#334155] bg-white">
+                        <div className="h-1.5 border border-[#e2e8f0] bg-white">
                           <div className={`h-full transition-all duration-500 ${agent.cpu > 70 ? 'bg-[#DC2626]' : 'bg-[#1E3A8A]'}`} style={{ width: `${agent.cpu}%` }} />
                         </div>
                         <div className="flex justify-between text-[9px] font-bold uppercase">
                           <span>RAM</span>
                           <span className="font-['JetBrains_Mono',_monospace] text-[#0F172A]">{agent.ram}%</span>
                         </div>
-                        <div className="h-1.5 border border-[#334155] bg-white">
+                        <div className="h-1.5 border border-[#e2e8f0] bg-white">
                           <div className="h-full bg-[#16A34A] transition-all duration-500" style={{ width: `${agent.ram}%` }} />
                         </div>
                       </div>
@@ -511,9 +514,9 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                       {agent.state === 'SYNCING' && (
                         <div>
                           <div className="flex justify-between text-[10px] text-[#0F172A] mb-1"><span>BAYANIHAN SYNCING</span><span className="font-['JetBrains_Mono',_monospace]">{agent.syncProgress}%</span></div>
-                          <div className="w-full h-3 border-2 border-[#334155] bg-white p-0.5">
-                            <div className="h-full bg-[#1E3A8A] transition-all duration-300" style={{ width: `${agent.syncProgress}%` }} />
-                          </div>
+                          <div className="w-full h-3 border border-[#e2e8f0] bg-white p-0.5">
+                              <div className="h-full bg-[#1a73e8] transition-all duration-300" style={{ width: `${agent.syncProgress}%` }} />
+                            </div>
                         </div>
                       )}
                     </td>
@@ -525,8 +528,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         </section>
 
         {/* Live Intelligence Stream */}
-        <section className="border-2 border-[#334155] bg-white flex flex-col" style={{ minHeight: 200, maxHeight: 300 }}>
-          <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest text-[#0F172A] flex justify-between items-center shrink-0">
+        <section className="border border-[#cccccc] bg-white flex flex-col" style={{ minHeight: 200, maxHeight: 300 }}>
+          <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest text-[#0F172A] flex justify-between items-center shrink-0">
             <span>Live Intelligence Stream (Socket.io)</span>
             <TerminalSquare className="w-5 h-5" />
           </div>
@@ -547,19 +550,19 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         <section className="grid grid-cols-2 gap-4 shrink-0">
 
           {/* Blockchain Ledger + Metrics */}
-          <div className="border-2 border-[#334155] bg-white flex flex-col">
-            <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
+          <div className="border border-[#cccccc] bg-white flex flex-col">
+            <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
               <Database className="w-5 h-5" />Blockchain Ledger (MultiChain)
               <button
                 onClick={() => exportCSV(ledger)}
-                className="ml-auto flex items-center gap-1 px-3 py-1 border-2 border-[#334155] text-[10px] font-bold uppercase tracking-widest hover:bg-[#1E3A8A] hover:text-white hover:border-[#1E3A8A] transition-none"
+                className="ml-auto flex items-center gap-1 px-3 py-1 border border-[#e2e8f0] text-[10px] font-bold uppercase tracking-widest hover:bg-[#1a73e8] hover:text-white hover:border-[#1a73e8] transition"
               >
                 <Download className="w-3 h-3" />Export CSV
               </button>
             </div>
 
             {/* Blockchain metrics strip */}
-            <div className="grid grid-cols-4 border-b-2 border-[#334155] font-['JetBrains_Mono',_monospace]">
+            <div className="grid grid-cols-4 border-b border-[#e2e8f0] font-['JetBrains_Mono',_monospace]">
               {[
                 { label:'Block Height',    value:`#${String(blockchainMetrics.blockHeight).padStart(8,'0')}` },
                 { label:'Chain Status',    value:blockchainMetrics.chainStatus, ok: blockchainMetrics.chainStatus === 'HEALTHY' },
@@ -575,20 +578,20 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
             <div className="flex-1 overflow-auto" style={{ maxHeight: 180 }}>
               <table className="w-full text-left border-collapse font-['JetBrains_Mono',_monospace] text-sm">
-                <thead className="bg-[#F8FAFC] border-b-2 border-[#334155] sticky top-0 z-10">
+                <thead className="bg-[#F8FAFC] border-b border-[#e2e8f0] sticky top-0 z-10">
                   <tr>
-                    <th className="p-3 border-r-2 border-[#334155] font-bold text-[#0F172A]">Block ID</th>
-                    <th className="p-3 border-r-2 border-[#334155] font-bold text-[#0F172A]">Timestamp</th>
-                    <th className="p-3 border-r-2 border-[#334155] font-bold text-[#0F172A]">Source MAC Hash</th>
+                    <th className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">Block ID</th>
+                    <th className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">Timestamp</th>
+                    <th className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">Source MAC Hash</th>
                     <th className="p-3 font-bold text-[#0F172A]">Confidence</th>
                   </tr>
                 </thead>
                 <tbody>
                   {ledger.map((row, i) => (
-                    <tr key={row.blockId} ref={i === 0 ? ledgerTopRef : null} className="border-b border-[#334155] hover:bg-slate-50 transition-none">
-                      <td className="p-3 border-r-2 border-[#334155]">{row.blockId}</td>
-                      <td className="p-3 border-r-2 border-[#334155]">{row.timestamp}</td>
-                      <td className="p-3 border-r-2 border-[#334155] font-bold">{row.macHash}</td>
+                    <tr key={row.blockId} ref={i === 0 ? ledgerTopRef : null} className="border-b border-[#e2e8f0] hover:bg-slate-50 transition">
+                      <td className="p-3 border-r border-[#e2e8f0]">{row.blockId}</td>
+                      <td className="p-3 border-r border-[#e2e8f0]">{row.timestamp}</td>
+                      <td className="p-3 border-r border-[#e2e8f0] font-bold">{row.macHash}</td>
                       <td className="p-3 text-[#16A34A] font-bold">{row.score}</td>
                     </tr>
                   ))}
@@ -598,37 +601,37 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           </div>
 
           {/* Relay Telemetry */}
-          <div className="border-2 border-[#334155] bg-white flex flex-col">
-            <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
+          <div className="border border-[#cccccc] bg-white flex flex-col">
+            <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
               <Cpu className="w-5 h-5" />Relay Telemetry &amp; Governance
             </div>
             <div className="flex-1 p-5 flex flex-col gap-5 justify-between">
               <div className="flex gap-6">
                 <div className="flex-1 flex flex-col gap-2">
                   <div className="flex justify-between text-sm font-bold uppercase"><span>Relay Node CPU</span><span className="font-['JetBrains_Mono',_monospace]">{telemetry.cpu}%</span></div>
-                  <div className="w-full h-8 border-2 border-[#334155] p-1 bg-[#F1F5F9]">
-                    <div className="h-full bg-[#1E3A8A] transition-all duration-500" style={{ width: `${telemetry.cpu}%` }} />
+                  <div className="w-full h-8 border border-[#e2e8f0] p-1 bg-white">
+                    <div className="h-full bg-[#1a73e8] transition-all duration-500" style={{ width: `${telemetry.cpu}%` }} />
                   </div>
                 </div>
                 <div className="flex-1 flex flex-col gap-2">
                   <div className="flex justify-between text-sm font-bold uppercase"><span>RAM Allocation</span><span className="font-['JetBrains_Mono',_monospace]">{telemetry.ram}%</span></div>
-                  <div className="w-full h-8 border-2 border-[#334155] p-1 bg-[#F1F5F9]">
-                    <div className="h-full bg-[#1E3A8A] transition-all duration-500" style={{ width: `${telemetry.ram}%` }} />
+                  <div className="w-full h-8 border border-[#e2e8f0] p-1 bg-white">
+                    <div className="h-full bg-[#1a73e8] transition-all duration-500" style={{ width: `${telemetry.ram}%` }} />
                   </div>
                 </div>
               </div>
 
               {/* ML Threshold live indicator */}
-              <div className="border-2 border-[#E2E8F0] p-3 flex justify-between items-center font-['JetBrains_Mono',_monospace] text-xs">
+              <div className="border border-[#e2e8f0] p-3 flex justify-between items-center font-['JetBrains_Mono',_monospace] text-xs">
                 <span className="text-[#64748B] uppercase tracking-widest">ML Confidence Threshold</span>
-                <span className="font-bold text-[#1E3A8A]">{policyConfig.mlThreshold.toFixed(2)}</span>
+                <span className="font-bold text-[#1a73e8]">{policyConfig.mlThreshold.toFixed(2)}</span>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
-                <button onClick={handleManualBlacklist} className="bg-[#0F172A] hover:bg-[#1E293B] text-white border-2 border-[#0F172A] p-4 uppercase font-bold text-sm tracking-widest flex justify-center items-center gap-2 active:bg-black transition-none">
+                <button onClick={handleManualBlacklist} className="bg-[#0F172A] hover:bg-[#102245] text-white border border-[#0F172A] p-4 uppercase font-bold text-sm tracking-widest flex justify-center items-center gap-2 transition">
                   <ShieldAlert className="w-5 h-5" />Manual Blacklist
                 </button>
-                <button onClick={handleFlush} className="bg-white hover:bg-[#F1F5F9] text-[#DC2626] border-2 border-[#DC2626] p-4 uppercase font-bold text-sm tracking-widest flex justify-center items-center gap-2 active:bg-red-50 transition-none">
+                <button onClick={handleFlush} className="bg-white hover:bg-[#F9FAFB] text-[#DC2626] border border-[#DC2626] p-4 uppercase font-bold text-sm tracking-widest flex justify-center items-center gap-2 transition">
                   <RotateCcw className="w-5 h-5" />Network-Wide Flush
                 </button>
               </div>
