@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { Shield, Eye, EyeOff, Fingerprint, Scan, KeyRound, ChevronRight, CheckCircle, XCircle, Loader } from 'lucide-react';
 
 type MFAMethod = 'otp' | 'fingerprint' | 'face';
@@ -32,6 +32,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   ]);
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
   const logRef = useRef<HTMLDivElement>(null);
+  const prevLogSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
 
   useEffect(() => {
     const lines = [
@@ -55,8 +56,27 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     return () => clearInterval(t);
   }, []);
 
-  useEffect(() => {
-    logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' });
+  useLayoutEffect(() => {
+    const c = logRef.current;
+    const prev = prevLogSnapshotRef.current;
+    const threshold = 40;
+    if (!c) {
+      prevLogSnapshotRef.current = null;
+      return;
+    }
+
+    if (!prev) {
+      prevLogSnapshotRef.current = { length: logLines.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
+      return; // don't auto-scroll on first snapshot
+    }
+
+    const prevLen = prev.length;
+    const prevAtBottom = (prev.scrollHeight - prev.scrollTop - prev.clientHeight <= threshold);
+    if (logLines.length > prevLen && prevAtBottom) {
+      c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
+    }
+
+    prevLogSnapshotRef.current = { length: logLines.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
   }, [logLines]);
 
   const handleCredSubmit = (e: React.FormEvent) => {

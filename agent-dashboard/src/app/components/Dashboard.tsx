@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Shield, Radio, Clock, Activity, Database,
@@ -157,6 +157,31 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
     { id: 6, timestamp: '2026-06-10 14:23:51', sourceMac: 'F4:5C:89:C3:2D:6E', attackType: 'MITM Attempt',  tier: 'Tier 1', action: 'Blocked' },
   ];
   const eLogs = live && tray.events && tray.events.length ? tray.events : detectionLogs;
+
+  const detectionLogsContainerRef = useRef<HTMLDivElement>(null);
+  const prevDetectionLogsSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
+
+  useLayoutEffect(() => {
+    const c = detectionLogsContainerRef.current;
+    const prev = prevDetectionLogsSnapshotRef.current;
+    const threshold = 40;
+    if (!c) { prevDetectionLogsSnapshotRef.current = null; return; }
+
+    if (!prev) {
+      prevDetectionLogsSnapshotRef.current = { length: eLogs.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
+      return;
+    }
+
+    const prevLen = prev.length;
+    const prevAtBottom = (prev.scrollHeight - prev.scrollTop - prev.clientHeight <= threshold);
+
+    // Do not auto-scroll by default; preserve user's scroll position when new records arrive
+    // If desired, enable conditional auto-scroll when prevAtBottom is true.
+    // Example:
+    // if (eLogs.length > prevLen && prevAtBottom) { c.scrollTop = c.scrollHeight; }
+
+    prevDetectionLogsSnapshotRef.current = { length: eLogs.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
+  }, [eLogs]);
 
   /* whitelist handlers removed */
 
@@ -362,13 +387,14 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
 
           {/* Row 3: Detection Log + Sidebar */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 bg-white border border-[#cccccc]">
+            <div className="lg:col-span-2 bg-white border border-[#cccccc] flex flex-col">
               <div className="px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5]">
                 <p className="text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold">Detection Log</p>
                 <p className="text-[#888] text-[9px] tracking-wider mt-0.5">Real-time threat detection activity</p>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-xs">
+              <div className="flex-1 overflow-x-auto">
+                <div ref={detectionLogsContainerRef} className="h-full max-h-[36rem] overflow-y-auto">
+                  <table className="w-full text-xs min-w-full">
                   <thead>
                     <tr className="border-b border-[#e0e0e0] bg-[#fafafa]">
                       {['TIMESTAMP', 'SOURCE MAC', 'ATTACK TYPE', 'TIER', 'ACTION'].map(h => (
@@ -391,7 +417,8 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                  </table>
+                </div>
               </div>
             </div>
 

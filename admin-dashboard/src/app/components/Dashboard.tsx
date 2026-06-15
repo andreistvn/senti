@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import {
   Shield, Activity, Database, Cpu, TerminalSquare, RotateCcw,
   ShieldAlert, Settings, LogOut, Wifi, Lock, Bell, Server, User,
@@ -66,7 +66,7 @@ function ToggleRow({ label, defaultOn }: { label: string; defaultOn: boolean }) 
 // ─── CSV Export ───────────────────────────────────────────────────────────────
 
 function exportCSV(ledger: LedgerEntry[]) {
-  const header = 'Block ID,Timestamp,Source MAC Hash,Model Confidence\n';
+  const header = 'BlockChain ID,Timestamp,Source MAC Hash,Model Confidence\n';
   const rows   = ledger.map(r => `${r.blockId},${r.timestamp},${r.macHash},${r.score}`).join('\n');
   const blob   = new Blob([header + rows], { type: 'text/csv' });
   const url    = URL.createObjectURL(blob);
@@ -132,13 +132,77 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   const logEndRef    = useRef<HTMLDivElement>(null);
   const ledgerTopRef = useRef<HTMLTableRowElement>(null);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
+  const ledgerContainerRef = useRef<HTMLDivElement>(null);
+  const prevLogsSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
+  const prevLedgerSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
   const pageTopRef   = useRef<HTMLDivElement>(null);
   const pageBottomRef= useRef<HTMLDivElement>(null);
 
-  // Auto-scroll log to bottom
-  useEffect(() => { logEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [logs]);
-  // Auto-scroll ledger to top (newest first)
-  useEffect(() => { ledgerTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }, [ledger]);
+  // Preserve and conditionally auto-scroll logs (append behavior)
+  useLayoutEffect(() => {
+    const c = logsContainerRef.current;
+    const prev = prevLogsSnapshotRef.current;
+    const threshold = 40;
+    if (!c) {
+      prevLogsSnapshotRef.current = null;
+      return;
+    }
+    // If we have no previous snapshot, initialize and skip auto-scroll to avoid unexpected jump
+    if (!prev) {
+      prevLogsSnapshotRef.current = { length: logs.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
+      return;
+    }
+
+    const prevLen = prev.length;
+    const prevAtBottom = (prev.scrollHeight - prev.scrollTop - prev.clientHeight <= threshold);
+
+    // Auto-scroll for Live Intelligence is intentionally disabled to preserve user scroll position.
+    // If you want to re-enable conditional auto-scroll, restore the check below.
+    // if (logs.length > prevLen && prevAtBottom) {
+    //   logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // }
+
+    // Update snapshot for next change
+    prevLogsSnapshotRef.current = { length: logs.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
+  }, [logs]);
+
+  // Preserve and conditionally auto-scroll ledger (prepend behavior)
+  useLayoutEffect(() => {
+    const c = ledgerContainerRef.current;
+    const prev = prevLedgerSnapshotRef.current;
+    const threshold = 40;
+    if (!c) {
+      prevLedgerSnapshotRef.current = null;
+      return;
+    }
+
+    // Initialize snapshot on first run to avoid forcing scroll position on initial data
+    if (!prev) {
+      prevLedgerSnapshotRef.current = { length: ledger.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
+      return;
+    }
+
+    const prevLen = prev.length;
+    const prevScrollHeight = prev.scrollHeight;
+    const prevScrollTop = prev.scrollTop;
+
+    if (ledger.length > prevLen) {
+      // content height increased (likely new items at top)
+      const delta = c.scrollHeight - prevScrollHeight;
+      const wasAtTop = (prevScrollTop <= threshold);
+      if (wasAtTop) {
+        // keep showing newest (scroll to top) by resetting the container scrollTop
+        // use immediate adjustment to avoid the browser scrolling the page
+        c.scrollTop = 0;
+      } else if (delta > 0) {
+        // preserve user's view by offsetting scrollTop by growth delta
+        c.scrollTop = prevScrollTop + delta;
+      }
+    }
+
+    prevLedgerSnapshotRef.current = { length: ledger.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
+  }, [ledger]);
 
   // ── Main simulation interval ───────────────────────────────────────────────
   useEffect(() => {
@@ -533,7 +597,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
             <span>Live Intelligence Stream (Socket.io)</span>
             <TerminalSquare className="w-5 h-5" />
           </div>
-          <div className="flex-1 overflow-y-auto p-4 font-['JetBrains_Mono',_monospace] text-sm bg-white text-slate-800 flex flex-col gap-2">
+          <div ref={logsContainerRef} className="flex-1 overflow-y-auto p-4 font-['JetBrains_Mono',_monospace] text-sm bg-white text-slate-800 flex flex-col gap-2">
             {logs.map(log => (
               <div key={log.id} className="border-b border-slate-200 pb-2">
                 <span className="text-slate-500 mr-2">[{log.timestamp}]</span>
@@ -576,11 +640,11 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               ))}
             </div>
 
-            <div className="flex-1 overflow-auto" style={{ maxHeight: 180 }}>
+            <div ref={ledgerContainerRef} className="flex-1 overflow-auto" style={{ maxHeight: 180 }}>
               <table className="w-full text-left border-collapse font-['JetBrains_Mono',_monospace] text-sm">
                 <thead className="bg-[#F8FAFC] border-b border-[#e2e8f0] sticky top-0 z-10">
                   <tr>
-                    <th className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">Block ID</th>
+                    <th className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">BlockChain ID</th>
                     <th className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">Timestamp</th>
                     <th className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">Source MAC Hash</th>
                     <th className="p-3 font-bold text-[#0F172A]">Confidence</th>

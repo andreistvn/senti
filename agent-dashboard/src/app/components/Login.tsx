@@ -49,7 +49,7 @@ export default function Login() {
 
             {/* Modal header */}
             <div className="bg-white border-b border-gray-100 px-6 py-4">
-              <h1 className="text-[#0b2540] tracking-[0.02em] text-lg font-bold">Administrator Authentication</h1>
+              <h1 className="text-[#0b2540] tracking-[0.02em] text-lg font-bold">Agent Authentication</h1>
             </div>
 
             {/* Modal body */}
