@@ -58,7 +58,7 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
         {statCards.map(s => (
           <div
             key={s.label}
-            className={`border-2 p-4 flex flex-col gap-1 ${s.alert ? 'border-[#DC2626] bg-[#FEF2F2]' : 'border-[#334155] bg-white'}`}
+            className={`border p-4 flex flex-col gap-1 ${s.alert ? 'border-[#DC2626] bg-[#FEF2F2]' : 'border-[#e2e8f0] bg-white'}`}
           >
             <span className="text-[#94A3B8] text-[10px] uppercase tracking-widest">{s.label}</span>
             <span className={`font-['JetBrains_Mono',_monospace] text-3xl font-bold ${s.alert ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>
@@ -75,8 +75,8 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
       </div>
 
       {/* Live rolling time-series */}
-      <section className="border-2 border-[#334155] bg-white flex flex-col">
-        <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
+      <section className="border border-[#cccccc] bg-white flex flex-col">
+        <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
           <TrendingUp className="w-5 h-5" />
           Live Network Traffic — ARP Packets Per Second
           {isOverLimit && (
@@ -126,8 +126,8 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
       </section>
 
       {/* 24h historical distribution */}
-      <section className="border-2 border-[#334155] bg-white flex flex-col">
-        <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
+      <section className="border border-[#cccccc] bg-white flex flex-col">
+        <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
           <BarChart2 className="w-5 h-5" />
           Threat Incident Distribution — Last 24 Hours (Simulated Historical)
         </div>

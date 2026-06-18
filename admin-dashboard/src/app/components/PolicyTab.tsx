@@ -101,8 +101,8 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
       <div className="grid grid-cols-2 gap-4">
 
         {/* Policy configurator */}
-        <section className="border-2 border-[#334155] bg-white flex flex-col">
-          <div className="bg-[#1E3A8A] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-white shrink-0">
+        <section className="border border-[#cccccc] bg-white flex flex-col">
+          <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
             <Sliders className="w-5 h-5" />
             Global Policy Configurator
           </div>
@@ -137,7 +137,7 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
             />
             <ToggleRow label="Auto-Blacklist on Threat" value={local.autoBlacklist} onChange={set('autoBlacklist') as (v: boolean) => void} />
           </div>
-          <div className="border-t-2 border-[#334155] p-4 flex items-center gap-4">
+          <div className="border-t border-[#e2e8f0] p-4 flex items-center gap-4">
             {changed.length > 0 ? (
               <div className="flex-1 text-[10px] text-[#DC2626] font-bold uppercase tracking-widest">
                 {changed.length} unsaved change{changed.length > 1 ? 's' : ''}
@@ -148,7 +148,7 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
             <button
               onClick={handleBroadcast}
               disabled={changed.length === 0 || broadcastPending}
-              className={`flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-widest border-2 transition-none ${changed.length > 0 && !broadcastPending ? 'bg-[#1E3A8A] border-[#1E3A8A] text-white hover:bg-[#1e40af]' : 'bg-[#F1F5F9] border-[#E2E8F0] text-[#94A3B8] cursor-not-allowed'}`}
+              className={`flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-widest border transition ${changed.length > 0 && !broadcastPending ? 'bg-[#0d1b3e] border-[#0d1b3e] text-white hover:bg-[#102245]' : 'bg-[#f9fafb] border-[#E2E8F0] text-[#94A3B8] cursor-not-allowed'}`}
             >
               {broadcastPending ? (
                 <><Radio className="w-4 h-4 animate-ping" />Broadcasting...</>
@@ -165,8 +165,8 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
         </section>
 
         {/* Active Node Topology & Health Map */}
-        <section className="border-2 border-[#334155] bg-white flex flex-col">
-          <div className="bg-[#F1F5F9] border-b-2 border-[#334155] p-3 px-4 font-bold uppercase text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
+        <section className="border border-[#cccccc] bg-white flex flex-col">
+          <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
             <Server className="w-5 h-5" />
             Active Node Topology & Health Map
             <span className="ml-auto font-['JetBrains_Mono',_monospace] text-[#16A34A] text-xs">
@@ -178,7 +178,7 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
               const cpuHigh = agent.cpu > 70;
               const ramHigh = agent.ram > 75;
               return (
-                <div key={agent.id} className={`border-2 p-4 ${cpuHigh ? 'border-[#DC2626]' : 'border-[#E2E8F0]'} bg-[#F8FAFC]`}>
+                <div key={agent.id} className={`border p-4 ${cpuHigh ? 'border-[#DC2626]' : 'border-[#E2E8F0]'} bg-[#F8FAFC]`}>
                   <div className="flex justify-between items-start mb-3">
                     <div>
                       <div className="font-bold uppercase tracking-wide text-sm text-[#0F172A]">{agent.name}</div>
@@ -194,7 +194,7 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
                         <span className="flex items-center gap-1"><Cpu className="w-3 h-3" />CPU</span>
                         <span className={`font-['JetBrains_Mono',_monospace] ${cpuHigh ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>{agent.cpu}%</span>
                       </div>
-                      <div className="h-2 border border-[#334155] bg-white">
+                      <div className="h-2 border border-[#e2e8f0] bg-white">
                         <div className={`h-full transition-all duration-500 ${cpuHigh ? 'bg-[#DC2626]' : 'bg-[#1E3A8A]'}`} style={{ width: `${agent.cpu}%` }} />
                       </div>
                     </div>
@@ -203,7 +203,7 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
                         <span>RAM</span>
                         <span className={`font-['JetBrains_Mono',_monospace] ${ramHigh ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>{agent.ram}%</span>
                       </div>
-                      <div className="h-2 border border-[#334155] bg-white">
+                      <div className="h-2 border border-[#e2e8f0] bg-white">
                         <div className={`h-full transition-all duration-500 ${ramHigh ? 'bg-[#DC2626]' : 'bg-[#16A34A]'}`} style={{ width: `${agent.ram}%` }} />
                       </div>
                     </div>
