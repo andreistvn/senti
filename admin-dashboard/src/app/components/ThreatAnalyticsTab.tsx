@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ReferenceLine, ResponsiveContainer, BarChart, Bar, Legend,
@@ -25,6 +25,37 @@ const HOURLY_DATA = (() => {
   }));
 })();
 
+// Mock generator for showcase/demo when no real `data` is provided.
+const generateMockData = (days = 3, intervalMinutes = 5) => {
+  const points: ThreatDataPoint[] = [];
+  const now = Date.now();
+  const total = Math.floor((days * 24 * 60) / intervalMinutes);
+  for (let i = total - 1; i >= 0; i--) {
+    const t = new Date(now - i * intervalMinutes * 60000);
+    // base diurnal pattern + noise
+    const hour = t.getUTCHours();
+    const base = Math.max(5, Math.round(20 + Math.sin((hour / 24) * Math.PI * 2) * 40));
+    const noise = Math.round(Math.random() * 20 - 10);
+    points.push({ time: t.toISOString(), pps: Math.max(1, base + noise), blocked: Math.round(Math.max(0, (base + noise) * (0.6 + Math.random() * 0.4))) });
+  }
+  // inject a few bursts
+  const injectBurst = (startOffsetMinutes: number, durationMinutes: number, peak: number) => {
+    const start = Date.now() - startOffsetMinutes * 60000;
+    for (let m = 0; m < durationMinutes; m += intervalMinutes) {
+      const ts = new Date(start + m * 60000).toISOString();
+      const idx = points.findIndex(p => p.time === ts);
+      if (idx >= 0) {
+        points[idx].pps = Math.max(points[idx].pps, Math.round(peak * (0.6 + Math.random() * 0.4)));
+        points[idx].blocked = Math.round(points[idx].pps * (0.7 + Math.random() * 0.25));
+      }
+    }
+  };
+  injectBurst(60, 30, 300); // 1 hour ago for 30 minutes
+  injectBurst(60*24 + 120, 45, 420); // yesterday + 2h
+  injectBurst(60*48 + 300, 90, 680); // 2 days ago + 5h
+  return points;
+};
+
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
@@ -38,9 +69,12 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
-  const peakPPS    = useMemo(() => Math.max(...data.map(d => d.pps)), [data]);
-  const avgPPS     = useMemo(() => Math.round(data.reduce((s, d) => s + d.pps, 0) / Math.max(data.length, 1)), [data]);
-  const currentPPS = data[data.length - 1]?.pps ?? 0;
+  const [useMock, setUseMock] = useState<boolean>(!data || data.length === 0);
+  const displayData = useMemo(() => (useMock ? generateMockData(3, 5) : (data && data.length ? data : generateMockData(3, 5))), [data, useMock]);
+
+  const peakPPS    = useMemo(() => Math.max(...displayData.map(d => d.pps)), [displayData]);
+  const avgPPS     = useMemo(() => Math.round(displayData.reduce((s, d) => s + d.pps, 0) / Math.max(displayData.length, 1)), [displayData]);
+  const currentPPS = displayData[displayData.length - 1]?.pps ?? 0;
   const isOverLimit = currentPPS >= arpFloodLimit;
 
   const statCards = [
@@ -49,6 +83,33 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
     { label: 'Avg PPS (Session)',     value: avgPPS,     unit: 'pps',      alert: false },
     { label: 'Alert Threshold',       value: arpFloodLimit, unit: 'pps limit', alert: false },
   ];
+
+  const [period, setPeriod] = useState<'daily'|'weekly'>('daily');
+
+  // Hourly profile (average pps per hour across samples) and weekday profile (total pps per weekday)
+  const hourlyProfile = useMemo(() => {
+    const buckets = Array.from({ length: 24 }, (_, i) => ({ hour: i, label: String(i).padStart(2, '0') + ':00', pps: 0, count: 0 }));
+    displayData.forEach(d => {
+      const dt = new Date(d.time);
+      if (isNaN(dt.getTime())) return;
+      const h = dt.getUTCHours();
+      buckets[h].pps += d.pps;
+      buckets[h].count += 1;
+    });
+    return buckets.map(b => ({ hour: b.hour, label: b.label, pps: b.count ? Math.round(b.pps / b.count) : 0 }));
+  }, [displayData]);
+
+  const weekdayProfile = useMemo(() => {
+    const names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const buckets = names.map((n, i) => ({ day: i, label: n, pps: 0 }));
+    displayData.forEach(d => {
+      const dt = new Date(d.time);
+      if (isNaN(dt.getTime())) return;
+      const day = dt.getUTCDay();
+      buckets[day].pps += d.pps;
+    });
+    return buckets.map(b => ({ day: b.day, label: b.label, pps: b.pps }));
+  }, [displayData]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -87,7 +148,7 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
         </div>
         <div className="p-4" style={{ height: 260 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+            <AreaChart data={displayData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <defs>
                 <linearGradient id="gradPPS" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%"  stopColor="#1E3A8A" stopOpacity={0.35} />
@@ -122,6 +183,46 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
               <Area key="area-blocked" type="monotone" dataKey="blocked" stroke="#DC2626" strokeWidth={2} fill="url(#gradBlocked)" name="Blocked PPS" dot={false} />
             </AreaChart>
           </ResponsiveContainer>
+        </div>
+      </section>
+
+      {/* Analytics: Daily / Weekly (Hourly profile or Weekday totals) */}
+      <section className="border border-[#cccccc] bg-white flex flex-col">
+        <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
+          <BarChart2 className="w-5 h-5" />
+          Analytics — Daily / Weekly
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={() => setPeriod('daily')} className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${period==='daily' ? 'bg-[#1E3A8A] text-white' : 'bg-white text-[#0F172A] border'} rounded`}>Daily</button>
+            <button onClick={() => setPeriod('weekly')} className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${period==='weekly' ? 'bg-[#1E3A8A] text-white' : 'bg-white text-[#0F172A] border'} rounded`}>Weekly</button>
+            <button onClick={() => setUseMock(v => !v)} className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${useMock ? 'bg-[#16A34A] text-white' : 'bg-white text-[#0F172A] border'} rounded`}>
+              {useMock ? 'Demo On' : 'Demo Off'}
+            </button>
+          </div>
+        </div>
+        <div className="p-4" style={{ height: 220 }}>
+          {period === 'daily' ? (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={hourlyProfile} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
+                <YAxis tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'JetBrains Mono', textTransform: 'uppercase', letterSpacing: '0.1em' }} />
+                <Bar dataKey="pps" name="Avg PPS (hour)" fill="#1E3A8A" maxBarSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          ) : (
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={weekdayProfile} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+                <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
+                <YAxis tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
+                <Tooltip content={<CustomTooltip />} />
+                <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'JetBrains Mono', textTransform: 'uppercase', letterSpacing: '0.1em' }} />
+                <Bar dataKey="pps" name="Total PPS (weekday)" fill="#1E3A8A" maxBarSize={40} />
+              </BarChart>
+            </ResponsiveContainer>
+          )}
         </div>
       </section>
 
