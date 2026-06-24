@@ -87,12 +87,7 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
   const [sigContributions, setSigContributions] = useState(15);
   const [usersProtected, setUsersProtected] = useState(40);
 
-  /* analytics */
-  const [analyticsRange, setAnalyticsRange] = useState<'7d' | '24h'>('7d');
-  const [chartData7d] = useState(gen7DayData);
-  const [chartData24h] = useState(gen24HData);
-  const chartData = analyticsRange === '7d' ? chartData7d : chartData24h;
-  const xKey = analyticsRange === '7d' ? 'day' : 'hour';
+  /* analytics removed from agent dashboard */
 
   /* whitelist removed */
 
@@ -209,7 +204,6 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
   /* ── tabs config ── */
   const TABS: { id: Tab; label: string; Icon: any }[] = [
     { id: 'dashboard',   label: 'DASHBOARD',   Icon: Activity },
-    { id: 'analytics',   label: 'ANALYTICS',   Icon: BarChart2 },
     { id: 'diagnostics', label: 'DIAGNOSTICS', Icon: Cpu },
     { id: 'settings',    label: 'SETTINGS',    Icon: Settings },
   ];
@@ -486,108 +480,7 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
         </div>
       )}
 
-      {/* ── ANALYTICS tab ── */}
-      {activeTab === 'analytics' && (
-        <div className="flex-1 p-5 space-y-5 overflow-auto max-w-[1800px] mx-auto w-full">
-
-          {/* Header row */}
-          <div className="flex items-center justify-between">
-            <div>
-              <h2 className="text-[#0d1b3e] text-sm tracking-widest font-bold uppercase">Historical Threat Analytics</h2>
-              <p className="text-[#888] text-[10px] tracking-wider mt-0.5">Threats blocked on this device over time</p>
-            </div>
-            <div className="flex border border-[#cccccc]">
-              {(['7d', '24h'] as const).map(r => (
-                <button
-                  key={r}
-                  onClick={() => setAnalyticsRange(r)}
-                  className={`px-4 py-2 text-[10px] tracking-widest uppercase transition ${
-                    analyticsRange === r ? 'bg-[#0d1b3e] text-white' : 'bg-white text-[#555] hover:bg-[#f0f0f0]'
-                  }`}
-                >
-                  {r === '7d' ? 'Last 7 Days' : 'Last 24 Hours'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Stacked area chart */}
-          <div className="bg-white border border-[#cccccc]">
-            <div className="px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5] flex items-center gap-3">
-              <BarChart2 className="w-4 h-4 text-[#0d1b3e]" />
-              <span className="text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold">Threats Blocked — {analyticsRange === '7d' ? 'Past Week' : 'Past 24 Hours'}</span>
-              <div className="ml-auto flex items-center gap-4 text-[9px] tracking-widest">
-                <span className="flex items-center gap-1"><span className="inline-block w-3 h-1.5" style={{ background: '#c0392b' }} /> ARP SPOOFING</span>
-                <span className="flex items-center gap-1"><span className="inline-block w-3 h-1.5" style={{ background: '#1a4fd6' }} /> MITM</span>
-                <span className="flex items-center gap-1"><span className="inline-block w-3 h-1.5" style={{ background: '#f59e0b' }} /> PROBE</span>
-              </div>
-            </div>
-            <div className="p-5">
-              <ResponsiveContainer width="100%" height={260}>
-                <AreaChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="sn-arpGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#c0392b" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#c0392b" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="sn-mitmGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#1a4fd6" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#1a4fd6" stopOpacity={0} />
-                    </linearGradient>
-                    <linearGradient id="sn-probeGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e8e8e8" />
-                  <XAxis dataKey={xKey} tick={{ fontSize: 9, fill: '#888', fontFamily: 'monospace' }} />
-                  <YAxis tick={{ fontSize: 9, fill: '#888', fontFamily: 'monospace' }} />
-                  <Tooltip content={<CyberTooltip />} />
-                  <Area type="monotone" dataKey="arp" stroke="#c0392b" strokeWidth={2} fill="url(#sn-arpGrad)" />
-                  <Area type="monotone" dataKey="mitm" stroke="#1a4fd6" strokeWidth={2} fill="url(#sn-mitmGrad)" />
-                  <Area type="monotone" dataKey="probe" stroke="#f59e0b" strokeWidth={2} fill="url(#sn-probeGrad)" />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Bar chart */}
-          <div className="bg-white border border-[#cccccc]">
-            <div className="px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5] flex items-center gap-3">
-              <BarChart2 className="w-4 h-4 text-[#0d1b3e]" />
-              <span className="text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold">Total Blocked per Period</span>
-            </div>
-            <div className="p-5">
-              <ResponsiveContainer width="100%" height={200}>
-                <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e8e8e8" />
-                  <XAxis dataKey={xKey} tick={{ fontSize: 9, fill: '#888', fontFamily: 'monospace' }} />
-                  <YAxis tick={{ fontSize: 9, fill: '#888', fontFamily: 'monospace' }} />
-                  <Tooltip content={<CyberTooltip />} />
-                  <Bar dataKey="arp" fill="#c0392b" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="mitm" fill="#1a4fd6" radius={[2, 2, 0, 0]} />
-                  <Bar dataKey="probe" fill="#f59e0b" radius={[2, 2, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-
-          {/* Summary stats */}
-          <div className="grid grid-cols-3 gap-4">
-            {[
-              { label: 'Total ARP Blocked', value: chartData.reduce((s, d) => s + d.arp, 0), color: '#c0392b' },
-              { label: 'Total MITM Blocked', value: chartData.reduce((s, d) => s + d.mitm, 0), color: '#1a4fd6' },
-              { label: 'Total Probes Blocked', value: chartData.reduce((s, d) => s + d.probe, 0), color: '#f59e0b' },
-            ].map(s => (
-              <div key={s.label} className="bg-white border border-[#cccccc] p-5">
-                <p className="text-[#888] text-[9px] tracking-widest uppercase mb-2">{s.label}</p>
-                <span className="text-3xl font-bold tracking-widest" style={{ color: s.color }}>{s.value}</span>
-                <p className="text-[#888] text-[9px] tracking-wider mt-1">{analyticsRange === '7d' ? 'this week' : 'last 24h'}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Analytics tab removed */}
 
       {/* Whitelist removed */}
 
