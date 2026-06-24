@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useRef } from 'react';
 import { Shield, Eye, EyeOff, Fingerprint, Scan, KeyRound, ChevronRight, CheckCircle, XCircle, Loader } from 'lucide-react';
 
 type MFAMethod = 'otp' | 'fingerprint' | 'face';
@@ -24,60 +24,8 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [mfaError, setMfaError] = useState('');
   const [scanProgress, setScanProgress] = useState(0);
   const [scanLabel, setScanLabel] = useState('');
-  const [logLines, setLogLines] = useState<string[]>([
-    '> SENTINET RELAY NODE v2.4.9 INITIALIZED',
-    '> ENCRYPTION LAYER: AES-256-GCM ACTIVE',
-    '> BLOCKCHAIN HANDSHAKE: MULTICHAIN OK',
-    '> AWAITING ADMIN AUTHENTICATION...',
-  ]);
+  
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
-  const logRef = useRef<HTMLDivElement>(null);
-  const prevLogSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
-
-  useEffect(() => {
-    const lines = [
-      '> SCANNING NETWORK TOPOLOGY...',
-      '> AGENT ALPHA: HEARTBEAT OK',
-      '> AGENT BRAVO: HEARTBEAT OK',
-      '> AGENT CHARLIE: HEARTBEAT OK',
-      '> AGENT DELTA: HEARTBEAT OK',
-      '> THREAT INDEX: NOMINAL',
-      '> SESSION TOKEN: PENDING ADMIN INPUT',
-    ];
-    let i = 0;
-    const t = setInterval(() => {
-      if (i < lines.length) {
-        setLogLines(prev => [...prev, lines[i]]);
-        i++;
-      } else {
-        clearInterval(t);
-      }
-    }, 800);
-    return () => clearInterval(t);
-  }, []);
-
-  useLayoutEffect(() => {
-    const c = logRef.current;
-    const prev = prevLogSnapshotRef.current;
-    const threshold = 40;
-    if (!c) {
-      prevLogSnapshotRef.current = null;
-      return;
-    }
-
-    if (!prev) {
-      prevLogSnapshotRef.current = { length: logLines.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
-      return; // don't auto-scroll on first snapshot
-    }
-
-    const prevLen = prev.length;
-    const prevAtBottom = (prev.scrollHeight - prev.scrollTop - prev.clientHeight <= threshold);
-    if (logLines.length > prevLen && prevAtBottom) {
-      c.scrollTo({ top: c.scrollHeight, behavior: 'smooth' });
-    }
-
-    prevLogSnapshotRef.current = { length: logLines.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
-  }, [logLines]);
 
   const handleCredSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -87,11 +35,9 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     }
     if (digitalId !== MOCK_DIGITAL_ID || password !== MOCK_PASSWORD) {
       setCredError('INVALID DIGITAL ID OR PASSWORD. ACCESS DENIED.');
-      setLogLines(prev => [...prev, `> AUTH FAILURE: INVALID CREDENTIALS FOR "${digitalId}"`]);
       return;
     }
     setCredError('');
-    setLogLines(prev => [...prev, `> CREDENTIALS ACCEPTED FOR "${digitalId}"`, '> INITIATING MFA CHALLENGE...']);
     setStep('mfa');
   };
 
@@ -109,27 +55,18 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     }
   };
 
-  const runScan = (label: string, successMsg: string) => {
+  const runScan = (label: string) => {
     setStep('verifying');
     setScanProgress(0);
     setScanLabel(label);
     let p = 0;
-    const scanMsgs = [
-      `> ${label} SCAN INITIATED...`,
-      `> READING BIOMETRIC SIGNATURE...`,
-      `> CROSS-REFERENCING ADMIN REGISTRY...`,
-    ];
-    let msgIdx = 0;
+    
     const t = setInterval(() => {
       p += Math.floor(Math.random() * 12) + 6;
-      if (msgIdx < scanMsgs.length && p > msgIdx * 33) {
-        setLogLines(prev => [...prev, scanMsgs[msgIdx]]);
-        msgIdx++;
-      }
       setScanProgress(Math.min(p, 100));
+      
       if (p >= 100) {
         clearInterval(t);
-        setLogLines(prev => [...prev, `> ${successMsg}`, '> SESSION GRANTED. LOADING DASHBOARD...']);
         setTimeout(() => { setStep('success'); setTimeout(onLogin, 1200); }, 400);
       }
     }, 180);
@@ -142,10 +79,9 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       if (entered.length < 6) { setMfaError('ENTER COMPLETE 6-DIGIT OTP.'); return; }
       if (entered !== MOCK_OTP) {
         setMfaError('INVALID OTP. VERIFICATION FAILED.');
-        setLogLines(prev => [...prev, '> OTP MISMATCH — CHALLENGE REJECTED.']);
         return;
       }
-      setLogLines(prev => [...prev, '> OTP ACCEPTED.', '> SESSION GRANTED. LOADING DASHBOARD...']);
+      
       setStep('verifying');
       setScanProgress(0);
       setScanLabel('OTP');
@@ -156,13 +92,11 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
         if (p >= 100) { clearInterval(t); setStep('success'); setTimeout(onLogin, 1200); }
       }, 120);
     } else if (mfaMethod === 'fingerprint') {
-      runScan('FINGERPRINT', 'BIOMETRIC MATCH CONFIRMED — FINGERPRINT');
+      runScan('FINGERPRINT');
     } else {
-      runScan('FACIAL RECOGNITION', 'BIOMETRIC MATCH CONFIRMED — FACE ID');
+      runScan('FACIAL RECOGNITION');
     }
   };
-
-  // removed mock OTP display for production
 
   return (
     <div className="min-h-screen w-full bg-[#f3f6f9] flex flex-col font-['Inter',_sans-serif] antialiased">
@@ -212,7 +146,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                       autoComplete="off"
                       spellCheck={false}
                     />
-                    <div className="text-[10px] text-[#475569] font-['JetBrains_Mono',_monospace] mt-1"></div>
                   </div>
 
                   <div>
@@ -235,7 +168,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                         {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                     </div>
-                    <div className="text-[10px] text-[#475569] font-['JetBrains_Mono',_monospace] mt-1"></div>
                   </div>
 
                   {credError && (
@@ -396,8 +328,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
             </div>
           </div>
         </div>
-
-        {/* Right — (SEC STATUS removed) */}
 
       </div>
 
