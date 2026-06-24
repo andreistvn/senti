@@ -114,8 +114,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     logRetentionDays: 30,
   });
 
-  const logEndRef    = useRef<HTMLDivElement>(null);
-  const ledgerTopRef = useRef<HTMLTableRowElement>(null);
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const ledgerContainerRef = useRef<HTMLDivElement>(null);
   const prevLogsSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
@@ -456,7 +454,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                 </span>
               </div>
             ))}
-            <div ref={logEndRef} />
           </div>
         </section>
 
@@ -513,7 +510,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                 </thead>
                 <tbody>
                   {ledger.map((row, i) => (
-                    <tr key={row.blockId} ref={i === 0 ? ledgerTopRef : null} className="border-b border-[#e2e8f0] hover:bg-slate-50 transition">
+                    <tr key={row.blockId} className="border-b border-[#e2e8f0] hover:bg-slate-50 transition">
                       <td className="p-3 border-r border-[#e2e8f0]">{row.blockId}</td>
                       <td className="p-3 border-r border-[#e2e8f0]">{row.timestamp}</td>
                       <td className="p-3 border-r border-[#e2e8f0] font-bold">{row.macHash}</td>

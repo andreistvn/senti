@@ -1,39 +1,13 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
-import { useNavigate } from 'react-router';
 import {
   Shield, Radio, Clock, Activity, Database,
-  TrendingUp, Users, AlertTriangle,
-  CheckCircle, XCircle, RefreshCw, Cpu,
-  Wifi, Server, Link, Award, BarChart2, Filter
+  TrendingUp, Users, RefreshCw, Cpu, Server, Award
 } from 'lucide-react';
-import {
-  LineChart, Line, AreaChart, Area, BarChart, Bar,
-  ResponsiveContainer, XAxis, YAxis, Tooltip, CartesianGrid
-} from 'recharts';
+import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { Power } from 'lucide-react';
 import { useTrayConnection } from '../hooks/useTrayConnection';
 
 type Tab = 'dashboard' | 'diagnostics';
-
-/* ── mock data generators ── */
-function gen7DayData() {
-  const labels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  return labels.map((day, i) => ({
-    day,
-    arp: Math.floor(Math.random() * 40 + 5 + i * 3),
-    mitm: Math.floor(Math.random() * 15 + 2),
-    probe: Math.floor(Math.random() * 8 + 1),
-  }));
-}
-
-function gen24HData() {
-  return Array.from({ length: 24 }, (_, i) => ({
-    hour: `${String(i).padStart(2, '0')}:00`,
-    arp: Math.floor(Math.random() * 12 + (i > 8 && i < 20 ? 8 : 1)),
-    mitm: Math.floor(Math.random() * 5 + 1),
-    probe: Math.floor(Math.random() * 3),
-  }));
-}
 
 interface DaemonService {
   id: string;
@@ -51,23 +25,7 @@ const INITIAL_DAEMONS: DaemonService[] = [
   { id: 'bayanihan', name: 'Bayanihan Agent', status: 'connected', detail: 'Peer mesh: 40 nodes reachable',          uptime: '4h 18m' },
 ];
 
-/* ── tooltip ── */
-function CyberTooltip({ active, payload, label }: any) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{ background: '#21325a', border: '1px solid #1e3a5f', padding: '8px 12px', fontSize: 10, fontFamily: 'monospace' }}>
-      <p style={{ color: '#8899bb', marginBottom: 4 }}>{label}</p>
-      {payload.map((p: any) => (
-        <p key={p.dataKey} style={{ color: p.color }}>
-          {p.dataKey.toUpperCase()}: {p.value}
-        </p>
-      ))}
-    </div>
-  );
-}
-
-export default function Dashboard({ onBack }: { onBack?: () => void }) {
-  const navigate = useNavigate();
+export default function Dashboard() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
 
   /* live telemetry */
@@ -148,7 +106,6 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
   useLayoutEffect(() => {
     const c = detectionLogsContainerRef.current;
     const prev = prevDetectionLogsSnapshotRef.current;
-    const threshold = 40;
     if (!c) { prevDetectionLogsSnapshotRef.current = null; return; }
 
     if (!prev) {
