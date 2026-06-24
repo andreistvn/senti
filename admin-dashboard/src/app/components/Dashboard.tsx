@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import {
   Shield, Activity, Database, Cpu, TerminalSquare, RotateCcw,
-  ShieldAlert, Settings, LogOut, Wifi, Lock, Bell, Server, User,
-  ToggleLeft, ToggleRight, TrendingUp, Download, Sliders,
+  ShieldAlert, LogOut, TrendingUp, Download, Sliders,
 } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import ThreatAnalyticsTab, { ThreatDataPoint } from './ThreatAnalyticsTab';
@@ -28,7 +27,7 @@ interface Agent {
 interface LogEntry    { id: number; timestamp: string; message: string; }
 interface LedgerEntry { blockId: string; timestamp: string; macHash: string; score: string; }
 
-type Tab = 'dashboard' | 'analytics' | 'policy' | 'settings';
+type Tab = 'dashboard' | 'analytics' | 'policy';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -46,21 +45,6 @@ function generateThreatPoint(prevPPS = 150, attackActive = false): ThreatDataPoi
   const pps    = Math.round(base + (Math.random() - 0.5) * 60);
   const blocked = Math.round(pps * (0.75 + Math.random() * 0.2));
   return { time: now(), pps: Math.max(10, pps), blocked: Math.min(blocked, pps) };
-}
-
-// ─── ToggleRow (settings) ────────────────────────────────────────────────────
-
-function ToggleRow({ label, defaultOn }: { label: string; defaultOn: boolean }) {
-  const [on, setOn] = useState(defaultOn);
-  return (
-    <div className="flex justify-between items-center border-b border-[#E2E8F0] pb-3">
-      <span className="text-[#64748B] uppercase tracking-widest text-xs">{label}</span>
-      <button onClick={() => setOn(v => !v)} className="flex items-center gap-2 transition-none">
-        {on ? <ToggleRight className="w-7 h-7 text-[#1E3A8A]" /> : <ToggleLeft className="w-7 h-7 text-[#94A3B8]" />}
-        <span className={`text-xs font-bold uppercase tracking-widest ${on ? 'text-[#1E3A8A]' : 'text-[#94A3B8]'}`}>{on ? 'ON' : 'OFF'}</span>
-      </button>
-    </div>
-  );
 }
 
 // ─── CSV Export ───────────────────────────────────────────────────────────────
@@ -136,48 +120,21 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const ledgerContainerRef = useRef<HTMLDivElement>(null);
   const prevLogsSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
   const prevLedgerSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
-  const pageTopRef   = useRef<HTMLDivElement>(null);
-  const pageBottomRef= useRef<HTMLDivElement>(null);
 
-  // Preserve and conditionally auto-scroll logs (append behavior)
   useLayoutEffect(() => {
     const c = logsContainerRef.current;
     const prev = prevLogsSnapshotRef.current;
-    const threshold = 40;
-    if (!c) {
-      prevLogsSnapshotRef.current = null;
-      return;
-    }
-    // If we have no previous snapshot, initialize and skip auto-scroll to avoid unexpected jump
-    if (!prev) {
-      prevLogsSnapshotRef.current = { length: logs.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
-      return;
-    }
-
-    const prevLen = prev.length;
-    const prevAtBottom = (prev.scrollHeight - prev.scrollTop - prev.clientHeight <= threshold);
-
-    // Auto-scroll for Live Intelligence is intentionally disabled to preserve user scroll position.
-    // If you want to re-enable conditional auto-scroll, restore the check below.
-    // if (logs.length > prevLen && prevAtBottom) {
-    //   logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    // }
-
-    // Update snapshot for next change
+    if (!c) { prevLogsSnapshotRef.current = null; return; }
+    if (!prev) { prevLogsSnapshotRef.current = { length: logs.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight }; return; }
     prevLogsSnapshotRef.current = { length: logs.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
   }, [logs]);
 
-  // Preserve and conditionally auto-scroll ledger (prepend behavior)
   useLayoutEffect(() => {
     const c = ledgerContainerRef.current;
     const prev = prevLedgerSnapshotRef.current;
     const threshold = 40;
-    if (!c) {
-      prevLedgerSnapshotRef.current = null;
-      return;
-    }
+    if (!c) { prevLedgerSnapshotRef.current = null; return; }
 
-    // Initialize snapshot on first run to avoid forcing scroll position on initial data
     if (!prev) {
       prevLedgerSnapshotRef.current = { length: ledger.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
       return;
@@ -188,15 +145,11 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     const prevScrollTop = prev.scrollTop;
 
     if (ledger.length > prevLen) {
-      // content height increased (likely new items at top)
       const delta = c.scrollHeight - prevScrollHeight;
       const wasAtTop = (prevScrollTop <= threshold);
       if (wasAtTop) {
-        // keep showing newest (scroll to top) by resetting the container scrollTop
-        // use immediate adjustment to avoid the browser scrolling the page
         c.scrollTop = 0;
       } else if (delta > 0) {
-        // preserve user's view by offsetting scrollTop by growth delta
         c.scrollTop = prevScrollTop + delta;
       }
     }
@@ -215,7 +168,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         const point    = generateThreatPoint(lastPPS, isAttack);
         prevPPSRef.current = point.pps;
 
-        // Sustained-attack toast: PPS > arpFloodLimit and cooldown 20s
         if (point.pps >= policyConfig.arpFloodLimit) {
           const elapsed = Date.now() - lastAlertRef.current;
           if (elapsed > 20_000) {
@@ -299,7 +251,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           }, 3000);
         }
 
-        // Update per-agent CPU/RAM
         return next.map(a => ({
           ...a,
           cpu: a.state === 'DETECTING'
@@ -373,25 +324,12 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     { key: 'dashboard', label: 'Dashboard',  icon: <Activity className="w-4 h-4" /> },
     { key: 'analytics', label: 'Analytics',  icon: <TrendingUp className="w-4 h-4" /> },
     { key: 'policy',    label: 'Policy',     icon: <Sliders className="w-4 h-4" /> },
-    { key: 'settings',  label: 'Settings',   icon: <Settings className="w-4 h-4" /> },
   ];
 
   return (
     <div className="min-h-screen w-full bg-[#e8eaed] flex flex-col p-4 font-['Inter',_sans-serif] text-slate-900 gap-4 box-border antialiased">
       {/* Toaster for push notifications */}
       <Toaster position="top-right" />
-
-      <div ref={pageTopRef} />
-
-      {/* Floating scroll buttons */}
-      <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2">
-        <button onClick={() => pageTopRef.current?.scrollIntoView({ behavior: 'smooth' })} className="w-11 h-11 bg-[#0d1b3e] border border-[#cccccc] text-white flex items-center justify-center hover:bg-[#102245] transition" title="Scroll to Top">
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><polyline points="18 15 12 9 6 15"/></svg>
-        </button>
-        <button onClick={() => pageBottomRef.current?.scrollIntoView({ behavior: 'smooth' })} className="w-11 h-11 bg-[#0d1b3e] border border-[#cccccc] text-white flex items-center justify-center hover:bg-[#102245] transition" title="Scroll to Bottom">
-          <svg xmlns="http://www.w3.org/2000/svg" className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
-      </div>
 
       {/* Header */}
       <header className="bg-[#0d1b3e] border-b-2 border-[#c0392b] px-6 py-3 flex items-center justify-between shrink-0">
@@ -434,94 +372,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       {/* ── Policy Tab ── */}
       {activeTab === 'policy' && (
         <PolicyTab config={policyConfig} agents={agentHealthData} onBroadcast={handlePolicyBroadcast} />
-      )}
-
-      {/* ── Settings Tab ── */}
-      {activeTab === 'settings' && (
-        <div className="flex flex-col gap-4">
-          <section className="bg-white border border-[#cccccc]">
-            <div className="bg-white border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><User className="w-5 h-5" />Admin Profile</div>
-            <div className="p-6 grid grid-cols-2 gap-6 font-['JetBrains_Mono',_monospace] text-sm">
-              {[
-                { label:'Digital ID',       value:'ADM-7734-ALPHA' },
-                
-                { label:'Role',             value:'Network Security Administrator' },
-                { label:'Last Login',       value:'2049-03-14  08:42:11 UTC' },
-                { label:'Session Token',    value:'eyJ0eXAiOiJKV1QiLCJhb...' },
-                { label:'MFA Method',       value:'OTP + FINGERPRINT' },
-              ].map(row => (
-                <div key={row.label} className="flex flex-col gap-1 border-b border-[#E2E8F0] pb-3">
-                  <span className="text-[#94A3B8] text-xs uppercase tracking-widest">{row.label}</span>
-                  <span className="text-[#0F172A] font-bold truncate">{row.value}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-          <div className="grid grid-cols-2 gap-4">
-            <section className="bg-white border border-[#cccccc]">
-              <div className="bg-white border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><Wifi className="w-5 h-5" />Network Configuration</div>
-              <div className="p-5 space-y-4 font-['JetBrains_Mono',_monospace] text-sm">
-                {[
-                  { label:'Control Hub IP',     value:'192.168.10.1' },
-                  { label:'Subnet Mask',         value:'255.255.255.0' },
-                  { label:'Gateway',             value:'192.168.10.254' },
-                  { label:'WebSocket Port',      value:'8080' },
-                  { label:'MultiChain RPC Port', value:'15590' },
-                  { label:'Sync Interval',       value:`${policyConfig.syncInterval} ms` },
-                ].map(row => (
-                  <div key={row.label} className="flex justify-between border-b border-[#E2E8F0] pb-3">
-                    <span className="text-[#64748B] uppercase tracking-widest text-xs self-center">{row.label}</span>
-                    <input className="bg-[#F8FAFC] border border-[#E2E8F0] px-3 py-1 text-[#0F172A] font-bold text-xs w-44 focus:outline-none focus:border-[#1a73e8]" defaultValue={row.value} />
-                  </div>
-                ))}
-              </div>
-            </section>
-            <section className="border border-[#cccccc] bg-white">
-              <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><Bell className="w-5 h-5" />Security &amp; Alerts</div>
-              <div className="p-5 space-y-4 font-['JetBrains_Mono',_monospace] text-sm">
-                {[
-                  { label:'ARP Spoof Detection',      on:true  },
-                  { label:'Rogue AP Alerts',           on:true  },
-                  { label:'Auto-Blacklist on Threat',  on:policyConfig.autoBlacklist },
-                  { label:'Bayanihan Sync Alerts',     on:true  },
-                  { label:'Chain Write Notifications', on:false },
-                  { label:'Email Alerts',              on:true  },
-                ].map(row => <ToggleRow key={row.label} label={row.label} defaultOn={row.on} />)}
-              </div>
-            </section>
-          </div>
-          <section className="border border-[#cccccc] bg-white">
-            <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A]"><Server className="w-5 h-5" />System Information</div>
-            <div className="p-5 grid grid-cols-4 gap-4 font-['JetBrains_Mono',_monospace] text-sm">
-              {[
-                { label:'POC Version',     value:'v2.4.9' },
-                { label:'OS',              value:'SentiOS 4.1 LTS' },
-                { label:'Node Runtime',    value:'Node.js 20.11.0' },
-                { label:'MultiChain',      value:'v2.3.3' },
-                { label:'Uptime',          value:'14d 06h 32m' },
-                { label:'Disk Usage',      value:'38.4 GB / 512 GB' },
-                { label:'Active Sessions', value:'1 (ADM-7734)' },
-                { label:'Chain Height',    value:`#${String(blockchainMetrics.blockHeight).padStart(8,'0')}` },
-              ].map(row => (
-                <div key={row.label} className="border border-[#E2E8F0] p-4 flex flex-col gap-1">
-                  <span className="text-[#94A3B8] text-[10px] uppercase tracking-widest">{row.label}</span>
-                  <span className="text-[#0F172A] font-bold text-xs">{row.value}</span>
-                </div>
-              ))}
-            </div>
-          </section>
-          <section className="border border-[#FCA5A5] bg-white">
-            <div className="bg-[#fee2e2] border-b border-[#FCA5A5] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#7f1d1d]"><Lock className="w-5 h-5" />Danger Zone</div>
-            <div className="p-5 flex flex-wrap gap-4">
-              {['Revoke All Sessions','Reset Agent Registry','Wipe Blockchain Cache','Factory Reset Node'].map(action => (
-                <button key={action} className="border border-[#DC2626] text-[#DC2626] px-5 py-3 text-xs font-bold uppercase tracking-widest hover:bg-[#DC2626] hover:text-white transition font-['JetBrains_Mono',_monospace]">{action}</button>
-              ))}
-              <button onClick={onLogout} className="border border-[#DC2626] bg-[#DC2626] text-white px-5 py-3 text-xs font-bold uppercase tracking-widest hover:bg-[#b91c1c] transition font-['JetBrains_Mono',_monospace] flex items-center gap-2 ml-auto">
-                <LogOut className="w-4 h-4" />Logout &amp; End Session
-              </button>
-            </div>
-          </section>
-        </div>
       )}
 
       {/* ── Dashboard Tab ── */}
@@ -640,6 +490,17 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               ))}
             </div>
 
+            {/* Sync Progress */}
+            <div className="p-4 border-b border-[#e2e8f0]">
+              <div className="flex justify-between items-center mb-1.5">
+                <span className="text-[#94A3B8] text-[9px] tracking-widest uppercase font-bold">SYNC PROGRESS</span>
+                <span className="text-[#64748B] text-[9px] tracking-wider font-bold">94% complete — Block {`#${String(blockchainMetrics.blockHeight).padStart(8,'0')}`}</span>
+              </div>
+              <div className="w-full bg-[#e0e0e0] h-2.5">
+                <div className="bg-[#1a73e8] h-2.5 transition-all duration-500" style={{ width: '94%' }} />
+              </div>
+            </div>
+
             <div ref={ledgerContainerRef} className="flex-1 overflow-auto" style={{ maxHeight: 180 }}>
               <table className="w-full text-left border-collapse font-['JetBrains_Mono',_monospace] text-sm">
                 <thead className="bg-[#F8FAFC] border-b border-[#e2e8f0] sticky top-0 z-10">
@@ -703,9 +564,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           </div>
         </section>
 
-        <div ref={pageBottomRef} />
       </>}
-
     </div>
   );
 }

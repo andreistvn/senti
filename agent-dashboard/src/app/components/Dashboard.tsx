@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Shield, Radio, Clock, Activity, Database,
-  TrendingUp, Settings, ArrowLeft, Users, AlertTriangle,
+  TrendingUp, Users, AlertTriangle,
   CheckCircle, XCircle, RefreshCw, Cpu,
   Wifi, Server, Link, Award, BarChart2, Filter
 } from 'lucide-react';
@@ -13,7 +13,7 @@ import {
 import { Power } from 'lucide-react';
 import { useTrayConnection } from '../hooks/useTrayConnection';
 
-type Tab = 'dashboard' | 'analytics' | 'diagnostics' | 'settings';
+type Tab = 'dashboard' | 'diagnostics';
 
 /* ── mock data generators ── */
 function gen7DayData() {
@@ -35,8 +35,6 @@ function gen24HData() {
   }));
 }
 
-// Whitelist feature removed from agent dashboard
-
 interface DaemonService {
   id: string;
   name: string;
@@ -49,7 +47,6 @@ const INITIAL_DAEMONS: DaemonService[] = [
   { id: 'scapy',  name: 'Scapy Sniffer',     status: 'active',    detail: 'Capturing ARP frames on wlan0',          uptime: '4h 23m' },
   { id: 'ml',     name: 'Tier-2 ML Engine',   status: 'loaded',    detail: 'RandomForest model v3.1 in memory',      uptime: '4h 23m' },
   { id: 'ws',     name: 'WebSocket Relay',    status: 'connected', detail: 'relay.dict.gov.ph:8443 · 12ms ping',     uptime: '4h 21m' },
-  { id: 'chain',  name: 'Blockchain Sync',    status: 'active',    detail: 'Block #49,812 · 94% synced',             uptime: '4h 23m' },
   { id: 'arp',    name: 'ARP Guard Module',   status: 'active',    detail: 'Monitoring 34 active hosts',             uptime: '4h 23m' },
   { id: 'bayanihan', name: 'Bayanihan Agent', status: 'connected', detail: 'Peer mesh: 40 nodes reachable',          uptime: '4h 18m' },
 ];
@@ -87,10 +84,6 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
   const [sigContributions, setSigContributions] = useState(15);
   const [usersProtected, setUsersProtected] = useState(40);
 
-  /* analytics removed from agent dashboard */
-
-  /* whitelist removed */
-
   /* daemons */
   const [daemons, setDaemons] = useState<DaemonService[]>(INITIAL_DAEMONS);
   const [restarting, setRestarting] = useState<string | null>(null);
@@ -103,15 +96,12 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
   useEffect(() => {
     const interval = setInterval(() => {
       if (live) {
-        // Counters/telemetry come straight from the tray; here we only push the
-        // latest live CPU sample into the rolling chart.
         setCpuData(prev => [
           ...prev.slice(1),
           { time: prev[prev.length - 1].time + 1, usage: liveCpu ?? prev[prev.length - 1].usage }
         ]);
         return;
       }
-      // ── mock fallback (tray not running) ──
       setCpuData(prev => [
         ...prev.slice(1),
         { time: prev[prev.length - 1].time + 1, usage: Math.random() * 15 + 2 }
@@ -129,7 +119,6 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
     return () => clearInterval(interval);
   }, [live, liveCpu]);
 
-  /* ── effective values: live tray data when connected, else mock ── */
   const eProtected     = live ? (tray.status?.protected ?? false) : true;
   const eInspected     = live ? (tray.stats?.inspected ?? 0) : inspected;
   const eDropped       = live ? (tray.stats?.dropped ?? 0) : dropped;
@@ -145,11 +134,11 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
   /* detection logs */
   const detectionLogs = [
     { id: 1, timestamp: '2026-06-10 14:32:18', sourceMac: 'A4:5E:60:E2:3B:1C', attackType: 'ARP Spoofing',  tier: 'Tier 1', action: 'Blocked' },
-    { id: 2, timestamp: '2026-06-10 14:31:45', sourceMac: 'B8:27:EB:4F:92:D3', attackType: 'MITM Attempt',  tier: 'Tier 2', action: 'Dropped' },
+    { id: 2, timestamp: '2026-06-10 14:31:45', sourceMac: 'B8:27:EB:4F:92:D3', attackType: 'ARP Spoofing',  tier: 'Tier 2', action: 'Dropped' },
     { id: 3, timestamp: '2026-06-10 14:29:12', sourceMac: '00:1A:7D:DA:71:13', attackType: 'ARP Spoofing',  tier: 'Tier 1', action: 'Blocked' },
-    { id: 4, timestamp: '2026-06-10 14:27:08', sourceMac: 'DC:A6:32:1F:E8:9A', attackType: 'MITM Attempt',  tier: 'Tier 1', action: 'Blocked' },
+    { id: 4, timestamp: '2026-06-10 14:27:08', sourceMac: 'DC:A6:32:1F:E8:9A', attackType: 'ARP Spoofing',  tier: 'Tier 1', action: 'Blocked' },
     { id: 5, timestamp: '2026-06-10 14:25:33', sourceMac: '2C:F0:5D:8B:42:A7', attackType: 'ARP Spoofing',  tier: 'Tier 2', action: 'Dropped' },
-    { id: 6, timestamp: '2026-06-10 14:23:51', sourceMac: 'F4:5C:89:C3:2D:6E', attackType: 'MITM Attempt',  tier: 'Tier 1', action: 'Blocked' },
+    { id: 6, timestamp: '2026-06-10 14:23:51', sourceMac: 'F4:5C:89:C3:2D:6E', attackType: 'ARP Spoofing',  tier: 'Tier 1', action: 'Blocked' },
   ];
   const eLogs = live && tray.events && tray.events.length ? tray.events : detectionLogs;
 
@@ -167,18 +156,8 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
       return;
     }
 
-    const prevLen = prev.length;
-    const prevAtBottom = (prev.scrollHeight - prev.scrollTop - prev.clientHeight <= threshold);
-
-    // Do not auto-scroll by default; preserve user's scroll position when new records arrive
-    // If desired, enable conditional auto-scroll when prevAtBottom is true.
-    // Example:
-    // if (eLogs.length > prevLen && prevAtBottom) { c.scrollTop = c.scrollHeight; }
-
     prevDetectionLogsSnapshotRef.current = { length: eLogs.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
   }, [eLogs]);
-
-  /* whitelist handlers removed */
 
   /* daemon restart */
   function restartDaemon(id: string) {
@@ -205,7 +184,6 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
   const TABS: { id: Tab; label: string; Icon: any }[] = [
     { id: 'dashboard',   label: 'DASHBOARD',   Icon: Activity },
     { id: 'diagnostics', label: 'DIAGNOSTICS', Icon: Cpu },
-    { id: 'settings',    label: 'SETTINGS',    Icon: Settings },
   ];
 
   return (
@@ -248,12 +226,6 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
             </button>
           ))}
         </div>
-        <button
-          onClick={() => { onBack?.(); navigate('/home'); }}
-          className="flex items-center gap-2 px-6 py-3 text-[10px] tracking-widest text-[#c0392b] hover:bg-red-50 border-l border-[#cccccc] uppercase transition"
-        >
-          <ArrowLeft className="w-3.5 h-3.5" /> BACK TO AGENT
-        </button>
       </div>
 
       {/* ── DASHBOARD tab ── */}
@@ -361,7 +333,7 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
               <PanelHeader icon={<TrendingUp className="w-4 h-4 text-[#1a4fd6]" strokeWidth={2} />} title="Traffic Throughput (PPS)" />
               <div className="p-5 space-y-3">
                 {[
-                  { label: 'INSPECTED', value: eInspected.toLocaleString(), pct: 82, color: '#1a4fd6', textColor: '#111' },
+                  { label: 'INSPECTED', value: eInspected.toLocaleString(), pct: 82, color: '#1a4fd6', textColor: '#111', hideBar: true },
                   { label: 'DROPPED',   value: eDropped.toLocaleString(),   pct: Math.min(eInspected ? eDropped / eInspected * 100 : 0, 30), color: '#c0392b', textColor: '#c0392b' },
                   { label: 'PASSED',    value: ePassed.toLocaleString(),    pct: 90, color: '#00aa55', textColor: '#00aa55' },
                 ].map(item => (
@@ -370,9 +342,11 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
                       <span className="text-[#555] text-[10px] tracking-widest">{item.label}</span>
                       <span className="text-sm font-bold tracking-widest" style={{ color: item.textColor }}>{item.value}</span>
                     </div>
-                    <div className="w-full bg-[#e0e0e0] h-2">
-                      <div className="h-2 transition-all duration-700" style={{ width: `${item.pct}%`, background: item.color }} />
-                    </div>
+                    {!item.hideBar && (
+                      <div className="w-full bg-[#e0e0e0] h-2">
+                        <div className="h-2 transition-all duration-700" style={{ width: `${item.pct}%`, background: item.color }} />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -437,18 +411,6 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
                       <span className="text-[#1a4fd6] text-[10px] tracking-wider font-bold">Protecting {eUsersProtected} other users today</span>
                     </div>
                   </div>
-                  <div className="mt-3">
-                    <div className="flex justify-between mb-1">
-                      <span className="text-[#888] text-[9px] tracking-widest">DAILY TARGET (20 sigs)</span>
-                      <span className="text-[#1a4fd6] text-[9px] tracking-widest">{Math.min(eSigContrib, 20)}/20</span>
-                    </div>
-                    <div className="w-full bg-[#e0e0e0] h-2">
-                      <div
-                        className="h-2 transition-all duration-700"
-                        style={{ width: `${Math.min(eSigContrib / 20 * 100, 100)}%`, background: '#f59e0b' }}
-                      />
-                    </div>
-                  </div>
                 </div>
               </div>
 
@@ -463,26 +425,10 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
                   <p className="text-[#888] text-[10px] tracking-wider">Last update: {lastUpdate}s ago</p>
                 </div>
               </div>
-
-              {/* Blockchain Sync */}
-              <div className="bg-white border border-[#cccccc]">
-                <PanelHeader icon={<Database className="w-3.5 h-3.5 text-[#0d1b3e]" strokeWidth={2} />} title="Blockchain Sync" />
-                <div className="p-4">
-                  <p className="text-[#888] text-[9px] tracking-widest mb-1.5">SYNC PROGRESS</p>
-                  <div className="w-full bg-[#e0e0e0] h-2.5">
-                    <div className="bg-[#1a4fd6] h-2.5" style={{ width: '94%' }} />
-                  </div>
-                  <p className="text-[#888] text-[9px] tracking-wider mt-1">94% complete — Block #49,812</p>
-                </div>
-              </div>
             </div>
           </div>
         </div>
       )}
-
-      {/* Analytics tab removed */}
-
-      {/* Whitelist removed */}
 
       {/* ── DIAGNOSTICS tab ── */}
       {activeTab === 'diagnostics' && (
@@ -556,13 +502,6 @@ export default function Dashboard({ onBack }: { onBack?: () => void }) {
               ))}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* ── SETTINGS tab ── */}
-      {activeTab === 'settings' && (
-        <div className="flex-1 flex items-center justify-center text-[#888] text-sm tracking-widest">
-          SETTINGS — COMING SOON
         </div>
       )}
     </div>

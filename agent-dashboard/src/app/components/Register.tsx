@@ -235,7 +235,7 @@ export default function Register() {
                   </button>
                   <p className="text-[#3a5070] text-[10px] tracking-wider text-center">
                     ALREADY REGISTERED?{' '}
-                    <button onClick={() => navigate('/login')} className="text-[#00ccaa] hover:text-white transition">AUTHENTICATE HERE</button>
+                    <button onClick={() => navigate('/login')} className="text-[#00ccaa] hover:text-[#009988] hover:underline transition">AUTHENTICATE HERE</button>
                   </p>
                 </div>
               )}
