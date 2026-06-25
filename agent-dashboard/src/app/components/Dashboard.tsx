@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import {
   Shield, Radio, Clock, Activity, Database,
-  TrendingUp, Users, RefreshCw, Cpu, Server, Award
+  TrendingUp, Users, RefreshCw, Cpu, Server, Award, LogOut
 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { Power } from 'lucide-react';
@@ -25,7 +25,7 @@ const INITIAL_DAEMONS: DaemonService[] = [
   { id: 'bayanihan', name: 'Bayanihan Agent', status: 'connected', detail: 'Peer mesh: 40 nodes reachable',          uptime: '4h 18m' },
 ];
 
-export default function Dashboard() {
+export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
 
   /* live telemetry */
@@ -182,6 +182,15 @@ export default function Dashboard() {
               <Icon className="w-3.5 h-3.5" /> {label}
             </button>
           ))}
+        </div>
+
+        <div className="flex">
+          <button 
+            onClick={onLogout} 
+            className="flex items-center gap-2 px-6 py-3 text-[10px] tracking-widest text-[#c0392b] hover:bg-red-50 border-l border-[#cccccc] uppercase transition"
+          >
+            <LogOut className="w-4 h-4" /> Logout
+          </button>
         </div>
       </div>
 
