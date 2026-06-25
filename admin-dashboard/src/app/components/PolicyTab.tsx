@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Radio, Sliders, Zap, CheckCircle, Cpu, MemoryStick, Server } from 'lucide-react';
+import { Radio, Sliders, Zap, CheckCircle, Cpu, Server } from 'lucide-react';
 
 export interface PolicyConfig {
   mlThreshold: number;

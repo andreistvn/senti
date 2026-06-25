@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { useNavigate } from 'react-router';
-import { Shield, Eye, EyeOff, Copy, Check, ChevronRight, Fingerprint, Lock, Key, AlertTriangle, Scan, ScanFace } from 'lucide-react';
+import { Shield, Eye, EyeOff, Copy, Check, ChevronRight, Fingerprint, Lock, AlertTriangle, Scan, ScanFace } from 'lucide-react';
 import { AuthContext } from '../App';
 
 export interface RegisteredUser {
@@ -85,12 +85,6 @@ export default function Register() {
   const [idCopied, setIdCopied] = useState(false);
 
   const [systemActive, setSystemActive] = useState(true);
-
-  const [cursor, setCursor] = useState(true);
-  useEffect(() => {
-    const t = setInterval(() => setCursor(c => !c), 530);
-    return () => clearInterval(t);
-  }, []);
 
   useEffect(() => {
     if (step !== 'mfa-verify') return;
@@ -235,7 +229,7 @@ export default function Register() {
                   </button>
                   <p className="text-[#3a5070] text-[10px] tracking-wider text-center">
                     ALREADY REGISTERED?{' '}
-                    <button onClick={() => navigate('/login')} className="text-[#00ccaa] hover:text-white transition">AUTHENTICATE HERE</button>
+                    <button onClick={() => navigate('/login')} className="text-[#00ccaa] hover:text-[#009988] hover:underline transition">AUTHENTICATE HERE</button>
                   </p>
                 </div>
               )}
