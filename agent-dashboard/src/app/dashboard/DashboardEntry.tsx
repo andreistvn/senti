@@ -1,9 +1,22 @@
-import React from 'react';
-import { createMemoryRouter, RouterProvider, Outlet } from 'react-router';
+import React, { useContext } from 'react';
+import { createMemoryRouter, RouterProvider, Outlet, useNavigate } from 'react-router';
 import { Toaster } from 'sonner';
+import { AuthContext } from '../App';
 import Register from '../components/Register';
 import Login from '../components/Login';
 import Dashboard from '../components/Dashboard';
+
+function DashboardRouteWrapper() {
+  const navigate = useNavigate();
+  const { setRegisteredUser } = useContext(AuthContext);
+
+  const handleLogout = () => {
+    setRegisteredUser(null);
+    navigate('/login', { replace: true });
+  };
+
+  return <Dashboard onLogout={handleLogout} />;
+}
 
 const router = createMemoryRouter([
   {
@@ -32,7 +45,7 @@ const router = createMemoryRouter([
     children: [
       { index: true, Component: Register },
       { path: 'login', Component: Login },
-      { path: 'dashboard', Component: Dashboard },
+      { path: 'dashboard', Component: DashboardRouteWrapper },
       { path: '*', Component: Register },
     ],
   },
