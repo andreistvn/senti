@@ -6,6 +6,7 @@ import {
 import { toast, Toaster } from 'sonner';
 import ThreatAnalyticsTab, { ThreatDataPoint } from './ThreatAnalyticsTab';
 import PolicyTab, { PolicyConfig, AgentHealth } from './PolicyTab';
+import { getAdminDashboardSeed, getAdminDashboardSeedFallback } from '../lib/adminApi';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ function exportCSV(ledger: LedgerEntry[]) {
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 
 export default function Dashboard({ onLogout }: { onLogout: () => void }) {
+  const [adminSeed, setAdminSeed] = useState(() => getAdminDashboardSeedFallback());
   const logIdCounter   = useRef(4);
   const lastAlertRef   = useRef<number>(0);       // timestamp of last sustained-attack toast
   const prevPPSRef     = useRef(150);
@@ -71,53 +73,47 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
 
-  const [agents, setAgents] = useState<Agent[]>([
-    { id:'A', name:'Agent Alpha',   ip:'192.168.10.101', mac:'AA:BB:CC:DD:EE:01', state:'PROTECTED', syncProgress:0, cpu:18, ram:42, connectedSince:'08:14:02', packetsProcessed:142830 },
-    { id:'B', name:'Agent Bravo',   ip:'192.168.10.102', mac:'AA:BB:CC:DD:EE:02', state:'PROTECTED', syncProgress:0, cpu:22, ram:51, connectedSince:'08:14:07', packetsProcessed:138420 },
-    { id:'C', name:'Agent Charlie', ip:'192.168.10.103', mac:'AA:BB:CC:DD:EE:03', state:'PROTECTED', syncProgress:0, cpu:15, ram:37, connectedSince:'08:15:11', packetsProcessed:159012 },
-    { id:'D', name:'Agent Delta',   ip:'192.168.10.104', mac:'AA:BB:CC:DD:EE:04', state:'PROTECTED', syncProgress:0, cpu:31, ram:58, connectedSince:'08:15:33', packetsProcessed:121765 },
-  ]);
+  const [agents, setAgents] = useState<Agent[]>(adminSeed.agents);
 
-  const [logs, setLogs] = useState<LogEntry[]>([
-    { id:1, timestamp:'14:30:00', message:'SYSTEM: POC-Control-Hub Initialized.' },
-    { id:2, timestamp:'14:30:02', message:'NETWORK: MultiChain connected successfully.' },
-    { id:3, timestamp:'14:30:05', message:'SOCKET: Listening on port 8080.' },
-  ]);
+  const [logs, setLogs] = useState<LogEntry[]>(adminSeed.logs);
 
-  const [ledger, setLedger] = useState<LedgerEntry[]>([
-    { blockId:'0x8A12', timestamp:'14:28:11', macHash:'FD:09:A1:XX', score:'98.2%' },
-    { blockId:'0x8A13', timestamp:'14:29:05', macHash:'E2:11:4B:XX', score:'94.5%' },
-  ]);
+  const [ledger, setLedger] = useState<LedgerEntry[]>(adminSeed.ledger);
 
-  const [telemetry, setTelemetry] = useState({ cpu: 12, ram: 44, latency: 14 });
+  const [telemetry, setTelemetry] = useState(adminSeed.telemetry);
 
   const [blockchainMetrics, setBlockchainMetrics] = useState({
-    blockHeight:    33912,
-    lastSyncTime:   now(),
-    chainStatus:    'HEALTHY' as 'HEALTHY' | 'DEGRADED',
-    totalIncidents: 47,
+    ...adminSeed.blockchainMetrics,
+    lastSyncTime: adminSeed.blockchainMetrics.lastSyncTime,
   });
 
-  const [threatHistory, setThreatHistory] = useState<ThreatDataPoint[]>(() =>
-    Array.from({ length: 20 }, (_, i) => ({
-      time:    `${String(14 + Math.floor(i / 4)).padStart(2,'0')}:${String((i * 15) % 60).padStart(2,'0')}:00`,
-      pps:     Math.floor(Math.random() * 180) + 40,
-      blocked: Math.floor(Math.random() * 140) + 30,
-    }))
-  );
+  const [threatHistory, setThreatHistory] = useState<ThreatDataPoint[]>(adminSeed.threatHistory);
 
-  const [policyConfig, setPolicyConfig] = useState<PolicyConfig>({
-    mlThreshold:      0.50,
-    arpFloodLimit:    1000,
-    autoBlacklist:    false,
-    syncInterval:     4000,
-    logRetentionDays: 30,
-  });
+  const [policyConfig, setPolicyConfig] = useState<PolicyConfig>(adminSeed.policyConfig);
 
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const ledgerContainerRef = useRef<HTMLDivElement>(null);
   const prevLogsSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
   const prevLedgerSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const seed = await getAdminDashboardSeed();
+      if (!alive) return;
+      setAdminSeed(seed);
+      setAgents(seed.agents);
+      setLogs(seed.logs);
+      setLedger(seed.ledger);
+      setTelemetry(seed.telemetry);
+      setBlockchainMetrics(seed.blockchainMetrics);
+      setThreatHistory(seed.threatHistory);
+      setPolicyConfig(seed.policyConfig);
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useLayoutEffect(() => {
     const c = logsContainerRef.current;

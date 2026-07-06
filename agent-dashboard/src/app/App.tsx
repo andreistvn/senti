@@ -2,10 +2,15 @@ import React, { useState } from 'react';
 import type { RegisteredUser } from './components/Register';
 import { DashboardApp } from './dashboard/DashboardEntry';
 
-export const AuthContext = React.createContext<{
+export interface AuthContextValue {
   registeredUser: RegisteredUser | null;
-  setRegisteredUser: (u: RegisteredUser) => void;
-}>({ registeredUser: null, setRegisteredUser: () => {} });
+  setRegisteredUser: React.Dispatch<React.SetStateAction<RegisteredUser | null>>;
+}
+
+export const AuthContext = React.createContext<AuthContextValue>({
+  registeredUser: null,
+  setRegisteredUser: () => {},
+});
 
 export default function App() {
   const [registeredUser, setRegisteredUser] = useState<RegisteredUser | null>(null);

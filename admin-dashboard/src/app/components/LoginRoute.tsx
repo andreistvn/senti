@@ -1,17 +1,18 @@
 import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router';
 import LoginPage from './LoginPage';
-import { authState } from '../routes';
+import { getAdminSession } from '../lib/adminApi';
 
 export default function LoginRoute() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    if (authState.authenticated) navigate('/dashboard', { replace: true });
+    void (async () => {
+      if ((await getAdminSession()).authenticated) navigate('/dashboard', { replace: true });
+    })();
   }, []);
 
   const handleLogin = () => {
-    authState.authenticated = true;
     navigate('/dashboard', { replace: true });
   };
 

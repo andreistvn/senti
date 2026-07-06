@@ -2,9 +2,12 @@ import React from 'react';
 import { createBrowserRouter, redirect } from 'react-router';
 import LoginRoute from './components/LoginRoute';
 import DashboardRoute from './components/DashboardRoute';
+import { isAdminAuthenticated } from './lib/adminApi';
 
-// Simple in-memory auth state shared across routes
-export const authState = { authenticated: false };
+async function requireAdminAuth() {
+  if (!(await isAdminAuthenticated())) return redirect('/');
+  return null;
+}
 
 export const router = createBrowserRouter([
   {
@@ -13,10 +16,7 @@ export const router = createBrowserRouter([
   },
   {
     path: '/dashboard',
-    loader: () => {
-      if (!authState.authenticated) return redirect('/');
-      return null;
-    },
+    loader: requireAdminAuth,
     element: <DashboardRoute />,
   },
 ]);
