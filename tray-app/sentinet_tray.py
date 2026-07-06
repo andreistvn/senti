@@ -1,17 +1,21 @@
 """
-SentiNet Agent — System Tray Controller.
+SentiNet Agent — System Tray Controller (unprivileged).
 
-Run this on your machine (NOT inside Figma Make):
+Run this on your machine (NOT as root)::
 
     cd tray-app
     python -m venv .venv
-    source .venv/bin/activate         # Windows: .venv\\Scripts\\activate
+    source .venv/bin/activate         # Windows: .venv\\\\Scripts\\\\activate
     pip install -r requirements.txt
     python sentinet_tray.py
 
 A shield icon appears in your OS tray/menu bar. Right-click it to toggle
 protection, open the dashboard, or quit. While the tray runs it serves a local
 API on http://127.0.0.1:8770 that the web dashboard reads for live state.
+
+This process is **unprivileged**. It does not touch raw sockets or perform any
+packet capture. All security-critical state comes from the root-privileged
+daemon (``sentinet_daemon.py``) via IPC.
 """
 import webbrowser
 
@@ -20,7 +24,7 @@ from PIL import Image, ImageDraw
 
 from api_server import ApiServer
 from config import API_HOST, API_PORT, DASHBOARD_URL
-from state import AgentState, SimulationEngine
+from state import AgentState
 
 # SentiNet palette
 GREEN = (0, 204, 102, 255)
@@ -52,12 +56,14 @@ def make_icon_image(protected: bool):
 
 def build(state: AgentState):
     def status_text(_item):
+        if not state.daemon_connected():
+            return "Status: DAEMON DISCONNECTED"
         return "Status: PROTECTED" if state.is_protected() else "Status: UNPROTECTED"
 
     def on_toggle(icon, _item):
         state.toggle()
-        icon.icon = make_icon_image(state.is_protected())
-        icon.update_menu()
+        # The actual state change will arrive via IPC TOGGLE_ACK.
+        # The on_change listener below will refresh the icon.
 
     def on_open_dashboard(_icon, _item):
         webbrowser.open(DASHBOARD_URL)
@@ -85,7 +91,7 @@ def build(state: AgentState):
         menu=menu,
     )
 
-    # keep the tray icon in sync if state changes elsewhere (dashboard toggle)
+    # keep the tray icon in sync when state changes via IPC
     def refresh():
         icon.icon = make_icon_image(state.is_protected())
         icon.update_menu()
@@ -97,21 +103,25 @@ def build(state: AgentState):
 def main():
     state = AgentState()
 
-    api = ApiServer(state).start()
-    sim = SimulationEngine(state)
-    sim.start()
+    # Connect to the root-privileged daemon over IPC.
+    ipc_client = state.connect_daemon()
 
-    print(f"[SentiNet] API listening on http://{API_HOST}:{API_PORT}")
-    print(f"[SentiNet] Dashboard target: {DASHBOARD_URL}")
-    print("[SentiNet] Tray icon is running. Right-click it for the menu.")
+    # Start the HTTP API server (serves the IPC-mirrored state to the dashboard).
+    api = ApiServer(state).start()
+
+    daemon_label = "CONNECTED" if state.daemon_connected() else "WAITING (will auto-connect)"
+    print(f"[SentiNet Tray] Daemon IPC: {daemon_label}")
+    print(f"[SentiNet Tray] API listening on http://{API_HOST}:{API_PORT}")
+    print(f"[SentiNet Tray] Dashboard target: {DASHBOARD_URL}")
+    print("[SentiNet Tray] Tray icon is running. Right-click it for the menu.")
 
     icon = build(state)
     try:
         icon.run()  # blocks on the main thread until Quit
     finally:
-        sim.stop()
+        ipc_client.stop()
         api.stop()
-        print("[SentiNet] Shut down cleanly.")
+        print("[SentiNet Tray] Shut down cleanly.")
 
 
 if __name__ == "__main__":
