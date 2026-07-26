@@ -28,6 +28,8 @@ from typing import Any, Dict, List, Optional, Set
 import psutil
 import scapy.all as scapy
 
+from ml_engine import MLEngine
+
 from config import AGENT_VERSION, SIM_TICK_SECONDS
 from ipc_protocol import (
     IpcServer,
@@ -203,11 +205,13 @@ class CaptureEngine(threading.Thread):
     
     Implements Tier-1 Fast-Filter: Drops packets instantly if the source MAC
     is in the in-memory blacklist.
+    Tier-2 Detective: For unknown MACs, evaluates via MLEngine.
     """
 
-    def __init__(self, state: DaemonState) -> None:
+    def __init__(self, state: DaemonState, ml_engine: MLEngine) -> None:
         super().__init__(daemon=True, name="capture-engine")
         self.state = state
+        self.ml_engine = ml_engine
         self._stop = threading.Event()
 
     def stop(self) -> None:
@@ -233,20 +237,49 @@ class CaptureEngine(threading.Thread):
         with self.state._lock:
             self.state.inspected += 1
 
-        if scapy.Ether in pkt:
+        if scapy.Ether in pkt and scapy.ARP in pkt:
             src_mac = pkt[scapy.Ether].src
+            op = pkt[scapy.ARP].op
+            src_ip = pkt[scapy.ARP].psrc
+            dst_ip = pkt[scapy.ARP].pdst
+            
             # Tier 1: Fast-Filter O(1) lookup
             if self.state.is_blacklisted(src_mac):
                 with self.state._lock:
                     self.state.blocked += 1
                     self.state.dropped += 1
-                    # In a real IPS this would be an iptables rule. 
-                    # Here we simulate the drop by ceasing processing.
+                    # Ceasing processing simulates a block.
                 return
             
-            # If not blacklisted, it passes Tier 1 (Tier 2 ML logic goes here in Phase 3)
+            # If not blacklisted, it passes Tier 1. Proceed to Tier 2 ML logic.
             with self.state._lock:
                 self.state.passed += 1
+
+            # Tier 2: Stateful ML Engine evaluation
+            score = self.ml_engine.process_packet(src_mac, op, src_ip, dst_ip)
+            
+            if score >= 0.50:
+                print(f"[Tier 2] THREAT DETECTED: {src_mac} (Score: {score:.2f})")
+                self.state.add_to_blacklist(src_mac)
+                
+                # Generate Attack Report format
+                event_id = len(self.state.events) + 1
+                now = datetime.now()
+                threat_event = {
+                    "id": event_id,
+                    "timestamp": now.strftime('%H:%M:%S'),
+                    "sourceMac": src_mac,
+                    "attackType": "ARP Spoofing" if score > 0.8 else "Anomalous ARP",
+                    "tier": "Tier 2",
+                    "action": "Blocked",
+                    "confidence": f"{score*100:.1f}%"
+                }
+                
+                with self.state._lock:
+                    self.state.events.appendleft(threat_event)
+                    self.state.last_threat = threat_event
+                    
+                # Phase 2 (Tier 3) will push this threat_event to the Relay Node
 
 class TelemetryEngine(threading.Thread):
     """Background thread that tracks real CPU and memory usage."""
@@ -282,7 +315,8 @@ class SentiNetDaemon:
 
     def __init__(self) -> None:
         self.state = DaemonState()
-        self.capture = CaptureEngine(self.state)
+        self.ml_engine = MLEngine()
+        self.capture = CaptureEngine(self.state, self.ml_engine)
         self.telemetry = TelemetryEngine(self.state)
         self.ipc = IpcServer(on_message=self._handle_tray_message)
         self._stop = threading.Event()

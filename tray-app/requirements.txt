@@ -9,3 +9,7 @@ pyobjc-framework-Quartz>=7.0; sys_platform == 'darwin'
 
 scapy>=2.5.0
 psutil
+scikit-learn
+joblib
+pandas
+numpy
