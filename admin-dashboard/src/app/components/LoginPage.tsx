@@ -1,5 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Shield, Eye, EyeOff, Fingerprint, Scan, KeyRound, ChevronRight, CheckCircle, XCircle, Loader } from 'lucide-react';
+import { signInAdmin, validateAdminCredentials, validateAdminOtp } from '../lib/adminApi';
 
 type MFAMethod = 'otp' | 'fingerprint' | 'face';
 type AuthStep = 'credentials' | 'mfa' | 'verifying' | 'success' | 'failed';
@@ -7,10 +8,6 @@ type AuthStep = 'credentials' | 'mfa' | 'verifying' | 'success' | 'failed';
 interface LoginPageProps {
   onLogin: () => void;
 }
-
-const MOCK_DIGITAL_ID = 'ADM-7734-ALPHA';
-const MOCK_PASSWORD = 'SentiNet@2049';
-const MOCK_OTP = '482910';
 
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [digitalId, setDigitalId] = useState('');
@@ -33,7 +30,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       setCredError('ALL FIELDS REQUIRED.');
       return;
     }
-    if (digitalId !== MOCK_DIGITAL_ID || password !== MOCK_PASSWORD) {
+    if (!validateAdminCredentials(digitalId, password)) {
       setCredError('INVALID DIGITAL ID OR PASSWORD. ACCESS DENIED.');
       return;
     }
@@ -67,6 +64,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       
       if (p >= 100) {
         clearInterval(t);
+        void signInAdmin(digitalId);
         setTimeout(() => { setStep('success'); setTimeout(onLogin, 1200); }, 400);
       }
     }, 180);
@@ -77,7 +75,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     if (mfaMethod === 'otp') {
       const entered = otp.join('');
       if (entered.length < 6) { setMfaError('ENTER COMPLETE 6-DIGIT OTP.'); return; }
-      if (entered !== MOCK_OTP) {
+      if (!validateAdminOtp(entered)) {
         setMfaError('INVALID OTP. VERIFICATION FAILED.');
         return;
       }
@@ -89,7 +87,12 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
       const t = setInterval(() => {
         p += 20;
         setScanProgress(Math.min(p, 100));
-        if (p >= 100) { clearInterval(t); setStep('success'); setTimeout(onLogin, 1200); }
+        if (p >= 100) {
+          clearInterval(t);
+          void signInAdmin(digitalId);
+          setStep('success');
+          setTimeout(onLogin, 1200);
+        }
       }, 120);
     } else if (mfaMethod === 'fingerprint') {
       runScan('FINGERPRINT');

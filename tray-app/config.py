@@ -19,3 +19,9 @@ AGENT_VERSION = "v2.4.9"
 
 # How often (seconds) the simulation engine ticks while protection is ON.
 SIM_TICK_SECONDS = float(os.environ.get("SENTINET_SIM_TICK", "1.0"))
+
+# IPC: Unix domain socket path (macOS/Linux) for daemon ↔ tray communication.
+IPC_SOCKET_PATH = os.environ.get("SENTINET_IPC_SOCKET", "/tmp/sentinet.sock")
+
+# IPC: TCP fallback port for Windows (where Unix sockets are unavailable).
+IPC_TCP_FALLBACK_PORT = int(os.environ.get("SENTINET_IPC_PORT", "8769"))
