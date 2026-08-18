@@ -20,21 +20,12 @@ interface DetectionLog {
   action: string;
 }
 
-const INITIAL_DAEMONS: DaemonService[] = [
-  { id: 'scapy', name: 'Scapy Sniffer', status: 'active', detail: 'Capturing ARP frames on wlan0', uptime: '4h 23m' },
-  { id: 'ml', name: 'Tier-2 ML Engine', status: 'loaded', detail: 'RandomForest model v3.1 in memory', uptime: '4h 23m' },
-  { id: 'ws', name: 'WebSocket Relay', status: 'connected', detail: 'relay.dict.gov.ph:8443 · 12ms ping', uptime: '4h 21m' },
-  { id: 'arp', name: 'ARP Guard Module', status: 'active', detail: 'Monitoring 34 active hosts', uptime: '4h 23m' },
-  { id: 'bayanihan', name: 'Bayanihan Agent', status: 'connected', detail: 'Peer mesh: 40 nodes reachable', uptime: '4h 18m' },
-];
-
-const DETECTION_LOGS: DetectionLog[] = [
-  { id: 1, timestamp: '2026-06-10 14:32:18', sourceMac: 'A4:5E:60:E2:3B:1C', attackType: 'ARP Spoofing', tier: 'Tier 1', action: 'Blocked' },
-  { id: 2, timestamp: '2026-06-10 14:31:45', sourceMac: 'B8:27:EB:4F:92:D3', attackType: 'ARP Spoofing', tier: 'Tier 2', action: 'Dropped' },
-  { id: 3, timestamp: '2026-06-10 14:29:12', sourceMac: '00:1A:7D:DA:71:13', attackType: 'ARP Spoofing', tier: 'Tier 1', action: 'Blocked' },
-  { id: 4, timestamp: '2026-06-10 14:27:08', sourceMac: 'DC:A6:32:1F:E8:9A', attackType: 'ARP Spoofing', tier: 'Tier 1', action: 'Blocked' },
-  { id: 5, timestamp: '2026-06-10 14:25:33', sourceMac: '2C:F0:5D:8B:42:A7', attackType: 'ARP Spoofing', tier: 'Tier 2', action: 'Dropped' },
-  { id: 6, timestamp: '2026-06-10 14:23:51', sourceMac: 'F4:5C:89:C3:2D:6E', attackType: 'ARP Spoofing', tier: 'Tier 1', action: 'Blocked' },
+const OFFLINE_DAEMONS: DaemonService[] = [
+  { id: 'scapy', name: 'Scapy Sniffer', status: 'offline', detail: 'Daemon unreachable', uptime: '0s' },
+  { id: 'ml', name: 'Tier-2 ML Engine', status: 'offline', detail: 'Daemon unreachable', uptime: '0s' },
+  { id: 'ws', name: 'WebSocket Relay', status: 'offline', detail: 'Daemon unreachable', uptime: '0s' },
+  { id: 'arp', name: 'ARP Guard Module', status: 'offline', detail: 'Daemon unreachable', uptime: '0s' },
+  { id: 'bayanihan', name: 'Bayanihan Agent', status: 'offline', detail: 'Daemon unreachable', uptime: '0s' },
 ];
 
 function statusColor(s: DaemonService['status']) {
@@ -48,62 +39,38 @@ function statusLabel(s: DaemonService['status']) {
 export function useDashboardState(intervalMs = 2000) {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [cpuData, setCpuData] = useState(
-    Array.from({ length: 60 }, (_, i) => ({ time: i, usage: Math.random() * 15 + 2 }))
+    Array.from({ length: 60 }, (_, i) => ({ time: i, usage: 0 }))
   );
-  const [memoryUsage, setMemoryUsage] = useState(84);
-  const [lastUpdate, setLastUpdate] = useState(3);
-  const [inspected, setInspected] = useState(1247);
-  const [dropped, setDropped] = useState(23);
-  const [passed, setPassed] = useState(1224);
-  const [sigContributions, setSigContributions] = useState(15);
-  const [usersProtected, setUsersProtected] = useState(40);
-  const [daemons, setDaemons] = useState<DaemonService[]>(INITIAL_DAEMONS);
+  
+  // Removed mock states (inspected, dropped, passed, daemons, etc.)
   const [restarting, setRestarting] = useState<string | null>(null);
 
   const tray = useTrayConnection(intervalMs);
   const live = tray.connected;
-  const liveCpu = tray.stats?.cpu;
+  const liveCpu = tray.stats?.cpu ?? 0;
 
   useEffect(() => {
     const interval = setInterval(() => {
-      if (live) {
-        setCpuData(prev => [
-          ...prev.slice(1),
-          { time: prev[prev.length - 1].time + 1, usage: liveCpu ?? prev[prev.length - 1].usage },
-        ]);
-        return;
-      }
-
       setCpuData(prev => [
         ...prev.slice(1),
-        { time: prev[prev.length - 1].time + 1, usage: Math.random() * 15 + 2 },
+        { time: prev[prev.length - 1].time + 1, usage: liveCpu },
       ]);
-      setMemoryUsage(Math.floor(Math.random() * 30 + 70));
-      setLastUpdate(Math.floor(Math.random() * 10) + 1);
-      setInspected(p => p + Math.floor(Math.random() * 10 + 2));
-      setDropped(p => (Math.random() > 0.7 ? p + 1 : p));
-      setPassed(p => p + Math.floor(Math.random() * 9 + 2));
-      if (Math.random() > 0.92) {
-        setSigContributions(c => c + 1);
-        setUsersProtected(u => u + Math.floor(Math.random() * 3));
-      }
     }, intervalMs);
 
     return () => clearInterval(interval);
-  }, [live, liveCpu, intervalMs]);
+  }, [liveCpu, intervalMs]);
 
-  const eProtected = live ? (tray.status?.protected ?? false) : true;
-  const eInspected = live ? (tray.stats?.inspected ?? 0) : inspected;
-  const eDropped = live ? (tray.stats?.dropped ?? 0) : dropped;
-  const ePassed = live ? (tray.stats?.passed ?? 0) : passed;
-  const eMemory = live ? (tray.stats?.memory ?? 0) : memoryUsage;
-  const eSigContrib = live ? (tray.stats?.bayanihan.contributions ?? 0) : sigContributions;
-  const eUsersProtected = live ? (tray.stats?.bayanihan.usersProtected ?? 0) : usersProtected;
-  const eLastThreat = live
-    ? tray.stats?.lastThreat ?? null
-    : { attackType: 'ARP Spoofing', sourceMac: 'A4:5E:60:E2:3B:1C', timestamp: '2 minutes ago' };
-  const eDaemons = live && tray.services ? tray.services : daemons;
-  const eLogs = live && tray.events && tray.events.length ? tray.events : DETECTION_LOGS;
+  // Expose ONLY real data. No mock fallback.
+  const eProtected = tray.status?.protected ?? false;
+  const eInspected = tray.stats?.inspected ?? 0;
+  const eDropped = tray.stats?.dropped ?? 0;
+  const ePassed = tray.stats?.passed ?? 0;
+  const eMemory = tray.stats?.memory ?? 0;
+  const eSigContrib = tray.stats?.bayanihan?.contributions ?? 0;
+  const eUsersProtected = tray.stats?.bayanihan?.usersProtected ?? 0;
+  const eLastThreat = tray.stats?.lastThreat ?? null;
+  const eDaemons = (live && tray.services) ? tray.services : OFFLINE_DAEMONS;
+  const eLogs = (live && tray.events) ? tray.events : [];
 
   const detectionLogsContainerRef = useRef<HTMLDivElement>(null);
   const prevDetectionLogsSnapshotRef = useRef<{ length: number; scrollTop: number; scrollHeight: number; clientHeight: number } | null>(null);
@@ -125,23 +92,16 @@ export function useDashboardState(intervalMs = 2000) {
   }, [eLogs]);
 
   function restartDaemon(id: string) {
+    // Mock restart logic removed. Real restart requires IPC commands which aren't fully hooked up.
     setRestarting(id);
-    setDaemons(prev => prev.map(d => (d.id === id ? { ...d, status: 'degraded' as const, detail: 'Restarting…', uptime: '0s' } : d)));
-    setTimeout(() => {
-      setDaemons(prev => prev.map(d => {
-        if (d.id !== id) return d;
-        const original = INITIAL_DAEMONS.find(x => x.id === id)!;
-        return { ...original, uptime: '0m 4s' };
-      }));
-      setRestarting(null);
-    }, 2200);
+    setTimeout(() => setRestarting(null), 1000);
   }
 
   return {
     activeTab,
     setActiveTab,
     cpuData,
-    lastUpdate,
+    lastUpdate: 0, // Not used as much anymore, or can be static
     eProtected,
     eInspected,
     eDropped,

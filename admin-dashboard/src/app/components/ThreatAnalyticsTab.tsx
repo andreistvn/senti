@@ -16,42 +16,7 @@ interface Props {
   arpFloodLimit: number;
 }
 
-const HOURLY_DATA = (() => {
-  const base = [18,12,8,5,4,3,6,22,45,80,120,135,98,110,145,189,230,310,420,510,480,390,280,190];
-  return base.map((v, i) => ({
-    hour: `${String(i).padStart(2,'0')}:00`,
-    incidents: v + Math.floor(Math.random() * 30),
-    blocked: Math.floor((v + Math.random() * 30) * 0.87),
-  }));
-})();
-
-const generateMockData = (days = 3, intervalMinutes = 5) => {
-  const points: ThreatDataPoint[] = [];
-  const now = Date.now();
-  const total = Math.floor((days * 24 * 60) / intervalMinutes);
-  for (let i = total - 1; i >= 0; i--) {
-    const t = new Date(now - i * intervalMinutes * 60000);
-    const hour = t.getUTCHours();
-    const base = Math.max(5, Math.round(20 + Math.sin((hour / 24) * Math.PI * 2) * 40));
-    const noise = Math.round(Math.random() * 20 - 10);
-    points.push({ time: t.toISOString(), pps: Math.max(1, base + noise), blocked: Math.round(Math.max(0, (base + noise) * (0.6 + Math.random() * 0.4))) });
-  }
-  const injectBurst = (startOffsetMinutes: number, durationMinutes: number, peak: number) => {
-    const start = Date.now() - startOffsetMinutes * 60000;
-    for (let m = 0; m < durationMinutes; m += intervalMinutes) {
-      const ts = new Date(start + m * 60000).toISOString();
-      const idx = points.findIndex(p => p.time === ts);
-      if (idx >= 0) {
-        points[idx].pps = Math.max(points[idx].pps, Math.round(peak * (0.6 + Math.random() * 0.4)));
-        points[idx].blocked = Math.round(points[idx].pps * (0.7 + Math.random() * 0.25));
-      }
-    }
-  };
-  injectBurst(60, 30, 300);
-  injectBurst(60*24 + 120, 45, 420);
-  injectBurst(60*48 + 300, 90, 680);
-  return points;
-};
+// Removed generateMockData and HOURLY_DATA to rely purely on backend telemetry
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -66,10 +31,8 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 };
 
 export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
-  // Demo is always on for historical data, live data feeds the area chart.
-  const mockFallback = useMemo(() => generateMockData(3, 5), []);
-  const historicalData = useMemo(() => generateMockData(30, 60), []); 
-  const displayData = data && data.length ? data : mockFallback;
+  // Use actual data from backend
+  const displayData = data || [];
 
   const peakPPS    = useMemo(() => Math.max(...displayData.map(d => d.pps)), [displayData]);
   const avgPPS     = useMemo(() => Math.round(displayData.reduce((s, d) => s + d.pps, 0) / Math.max(displayData.length, 1)), [displayData]);
@@ -87,7 +50,7 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
 
   const hourlyProfile = useMemo(() => {
     const buckets = Array.from({ length: 24 }, (_, i) => ({ hour: i, label: String(i).padStart(2, '0') + ':00', pps: 0, count: 0 }));
-    historicalData.forEach(d => {
+    displayData.forEach(d => {
       const dt = new Date(d.time);
       if (isNaN(dt.getTime())) return;
       const h = dt.getUTCHours();
@@ -95,23 +58,23 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
       buckets[h].count += 1;
     });
     return buckets.map(b => ({ hour: b.hour, label: b.label, pps: b.count ? Math.round(b.pps / b.count) : 0 }));
-  }, [historicalData]);
+  }, [displayData]);
 
   const weekdayProfile = useMemo(() => {
     const names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const buckets = names.map((n, i) => ({ day: i, label: n, pps: 0 }));
-    historicalData.forEach(d => {
+    displayData.forEach(d => {
       const dt = new Date(d.time);
       if (isNaN(dt.getTime())) return;
       const day = dt.getUTCDay();
       buckets[day].pps += d.pps;
     });
     return buckets.map(b => ({ day: b.day, label: b.label, pps: b.pps }));
-  }, [historicalData]);
+  }, [displayData]);
 
   const monthlyProfile = useMemo(() => {
     const buckets = Array.from({ length: 30 }, (_, i) => ({ day: i + 1, label: `Day ${i + 1}`, pps: 0, count: 0 }));
-    historicalData.forEach(d => {
+    displayData.forEach(d => {
       const dt = new Date(d.time);
       if (isNaN(dt.getTime())) return;
       let day = dt.getUTCDate() - 1;
@@ -120,7 +83,7 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
       buckets[day].count += 1;
     });
     return buckets.map(b => ({ day: b.day, label: b.label, pps: b.count ? Math.round(b.pps / b.count) : 0 }));
-  }, [historicalData]);
+  }, [displayData]);
 
   return (
     <div className="flex flex-col gap-4">
@@ -254,7 +217,7 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
         </div>
         <div className="p-4" style={{ height: 200 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={HOURLY_DATA} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
+            <BarChart data={[]} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
               <CartesianGrid key="grid-bar" strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis key="xaxis-bar" dataKey="hour" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} interval={1} />
               <YAxis key="yaxis-bar" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
