@@ -1,23 +1,92 @@
 # SentiNet Development Setup
 
-Complete setup and run instructions for the full stack: admin backend, admin dashboard, agent dashboard, and system tray daemon.
+Complete setup and run instructions for the full stack: admin backend, admin dashboard, agent dashboard, system tray daemon, and the newly added machine learning & experiment pipelines.
+
+## Repository Structure
+
+- `admin-backend/`: The Relay Node FastAPI server & SQLite DB
+- `admin-dashboard/`: The Relay Node Next.js/Vite frontend
+- `agent-dashboard/`: The Agent local frontend
+- `tray-app/`: The Agent Daemon (runs as root, handles packet sniffing & detection)
+- `traffic-gen/`: Scripts to simulate benign traffic, ARP floods, and MITM poison attacks
+- `model-training/`: Pipeline for extracting datasets and training the Random Forest models
+- `experiments/`: Scripts and notebooks for running evaluations (Chapter 4 methodology)
 
 ## Prerequisites
 
 - **Node.js** 18+ (for dashboards)
-- **Python** 3.9+ (for backends)
+- **Python** 3.9+ (for backends, daemons, and ML)
 - **npm** or **pnpm** (for dashboards)
 
-## Quick Start (macOS/Linux)
+## Initial Setup (Run Once)
+
+Before you can run the system, you must install the dependencies for each component.
+
+In case of incompatible commands due to OS differences, just look up the equivalent commands for your operating system.
+
+### 1. Admin Backend
+```bash
+cd admin-backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cd ..
+```
+
+### 2. Admin Dashboard
+```bash
+cd admin-dashboard
+npm install
+cd ..
+```
+
+### 3. Agent Dashboard
+```bash
+cd agent-dashboard
+npm install
+cd ..
+```
+
+### 4. Tray Daemon
+```bash
+cd tray-app
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cd ..
+```
+
+---
+
+## Starting the System (Quick Start)
+
+Once dependencies are installed, the easiest way to boot everything up is using the automated bash script:
+
+```bash
+./start_all.sh
+```
+*(Note: You will be prompted for your `sudo` password to allow the daemon to sniff network packets. It may take a minute for the Node servers to compile).*
+
+## Quick Start (Windows)
+
+To start the entire system on Windows, open an **Administrator Command Prompt** and run the batch script:
+
+```cmd
+start_all.bat
+```
+
+---
+
+## Manual Component Setup
+
+If you prefer to run components manually (or need to see specific terminal outputs for debugging), follow these steps (assuming you have already run the Initial Setup):
 
 ### Terminal 1: Admin Backend
 
 ```bash
 cd admin-backend
-python3.12 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
-python main.py
+python3 main.py
 ```
 
 Runs on `http://127.0.0.1:8771`.
@@ -26,118 +95,53 @@ Runs on `http://127.0.0.1:8771`.
 
 ```bash
 cd admin-dashboard
-npm install
 npm run dev
 ```
 
-Open `http://localhost:5173` in your browser.
+Open `http://localhost:5175` in your browser.
+*(Note: Configuration like the Backend URL is pre-configured in `.env.local`, which is deliberately tracked in version control for this POC).*
 
 ### Terminal 3: Agent Dashboard
 
 ```bash
 cd agent-dashboard
-npm install
 npm run dev
 ```
 
-Open `http://localhost:5174` (or next available port).
+Open `http://localhost:5173` (or next available port).
 
 ### Terminal 4: Tray Daemon (Agent Backend)
 
 ```bash
 cd tray-app
-python3.12 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
-python sentinet_tray.py
+python3 sentinet_tray.py
 ```
 
 Runs on `http://127.0.0.1:8770` (background process).
 
-## Quick Start (Windows)
+### Terminal 5: Traffic Generation Testbed (Experimental)
 
-### Command Prompt 1: Admin Backend
-
-```batch
-cd admin-backend
-if exist venv rmdir /s /q venv
-python -m venv venv
-call venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-python main.py
-```
-
-### Command Prompt 2: Admin Dashboard
-
-```batch
-cd admin-dashboard
-npm install
-npm run dev
-```
-
-### Command Prompt 3: Agent Dashboard
-
-```batch
-cd agent-dashboard
-npm install
-npm run dev
-```
-
-### Command Prompt 4: Tray Daemon
-
-```batch
-cd tray-app
-if exist venv rmdir /s /q venv
-python -m venv venv
-call venv\Scripts\activate
-python -m pip install --upgrade pip
-pip install -r requirements.txt
-python sentinet_tray.py
-```
-
-## After Initial Setup
-
-Once all dependencies are installed, you only need to activate the venvs and run the services:
-
-### macOS/Linux
+To perform the T-Test evaluations described in the methodology, run these scripts on the Kali Linux testbed:
 
 ```bash
-# Terminal 1: Admin Backend
-cd admin-backend && source venv/bin/activate && python main.py
+cd traffic-gen
+# Simulate normal network background noise:
+python3 benign_traffic.py
 
-# Terminal 2: Admin Dashboard
-cd admin-dashboard && npm run dev
+# Simulate a high-volume ARP flood attack (~1,000 PPS):
+python3 attack_generator.py flood --target <TARGET_IP>
 
-# Terminal 3: Agent Dashboard
-cd agent-dashboard && npm run dev
-
-# Terminal 4: Tray Daemon
-cd tray-app && source venv/bin/activate && python sentinet_tray.py
-```
-
-### Windows
-
-```batch
-REM Command Prompt 1: Admin Backend
-cd admin-backend && call venv\Scripts\activate && python main.py
-
-REM Command Prompt 2: Admin Dashboard
-cd admin-dashboard && npm run dev
-
-REM Command Prompt 3: Agent Dashboard
-cd agent-dashboard && npm run dev
-
-REM Command Prompt 4: Tray Daemon
-cd tray-app && call venv\Scripts\activate && python sentinet_tray.py
+# Simulate a targeted Man-in-the-Middle (MITM) ARP poisoning attack:
+python3 attack_generator.py poison --target <TARGET_IP> --gateway <GATEWAY_IP>
 ```
 
 ## Service URLs
 
 | Service | URL | Purpose |
 |---------|-----|---------|
-| Admin Dashboard | http://localhost:5173 | Web UI for system administration |
-| Agent Dashboard | http://localhost:5174 | Web UI for agent protection status |
+| Admin Dashboard | http://localhost:5175 | Web UI for system administration |
+| Agent Dashboard | http://localhost:5173 | Web UI for agent protection status |
 | Admin Backend | http://127.0.0.1:8771 | API for admin dashboard (localhost only) |
 | Tray Daemon | http://127.0.0.1:8770 | API for agent dashboard (localhost only) |
 
@@ -147,14 +151,31 @@ cd tray-app && call venv\Scripts\activate && python sentinet_tray.py
 
 - Digital ID: `ADM-7734-ALPHA`
 - Password: `SentiNet@2049`
-- MFA: `482910` (OTP), or use Fingerprint/Face ID (demo mode)
+- MFA Code: `482910`
 
 **Agent Dashboard:**
 
-- Digital ID: `AGT-0001-ALPHA`
-- Password: `ARP@Guardian`
+- Digital ID: *(Any value)*
+- Password: *(Any value)*
+- *(The agent dashboard currently accepts any mock credentials during this POC phase).*
 
 ## Troubleshooting
+
+### Clean Shutdown / Zombie Processes
+
+If the system fails to start due to port conflicts (`Address already in use`), or if you need to shut down the system after using `start_all`, **do not just close the terminal windows.**
+
+**Mac / Linux:**
+Run the stop script to safely and forcefully kill all Python and Node processes related to the system:
+```bash
+./stop_all.sh
+```
+
+**Windows:**
+Run the stop batch script from an Administrator Command Prompt:
+```cmd
+stop_all.bat
+```
 
 ### Python venv issues
 
@@ -177,20 +198,6 @@ npm cache clean --force
 npm install
 ```
 
-### Port conflicts
-
-If ports 5173/5174 are in use, Vite will use the next available port. Check the console output for the actual URL.
-
-For the backend services, you can change ports via environment variables:
-
-```bash
-# Admin backend on port 8772
-ADMIN_API_PORT=8772 python main.py
-
-# Update admin dashboard .env.local accordingly
-VITE_ADMIN_API_BASE_URL=http://127.0.0.1:8772
-```
-
 ### Backend connection errors
 
-If the dashboards show "Loading..." and then fallback to mock data, ensure both backend services are running and accessible on their respective ports.
+If the dashboards show "Loading..." and then fallback to mock data, ensure both backend services are running and accessible on their respective ports. Verify that the URL in `.env.local` matches the port your backend is actually running on.

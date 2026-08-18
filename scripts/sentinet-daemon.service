@@ -1,0 +1,15 @@
+[Unit]
+Description=SentiNet Agent Daemon (Tier 1 & Tier 2)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+# The INSTALL_DIR will be replaced by the install.sh script
+WorkingDirectory={{INSTALL_DIR}}/tray-app
+ExecStart={{INSTALL_DIR}}/tray-app/venv/bin/python3 sentinet_daemon.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

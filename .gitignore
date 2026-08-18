@@ -1,18 +1,22 @@
 # macOS artifacts
+**/.DS_Store
 .DS_Store
 
 # Frontend dependencies & builds
 node_modules/
 dist/
 build/
-.env
-.env.local
+.next/
 
 # Python virtual environment & runtime caches
 .venv/
 venv/
 __pycache__/
 *.pyc
+
+# Local Databases (Do not push state)
+*.db
+*.sqlite3
 
 # Ignore ML datasets
 *.csv
