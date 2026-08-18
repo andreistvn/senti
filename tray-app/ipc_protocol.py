@@ -79,8 +79,9 @@ def create_server_socket() -> socket.socket:
 
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         sock.bind(IPC_SOCKET_PATH)
-        # Allow group read/write so the unprivileged tray user can connect.
-        os.chmod(IPC_SOCKET_PATH, 0o770)
+        # Allow read/write for all users so the unprivileged tray can connect
+        # even when this socket is created by root.
+        os.chmod(IPC_SOCKET_PATH, 0o666)
     else:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
