@@ -16,13 +16,27 @@ Implements the contract endpoints for the admin dashboard:
 """
 
 from fastapi import FastAPI, HTTPException, Cookie
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import config
 import state
+import socketio
 
 app = FastAPI(title='SentiNet Admin Backend', version='1.0.0')
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5175", "http://127.0.0.1:5175", "http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize Socket.io Server
+sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
+socket_app = socketio.ASGIApp(sio, app)
 
 
 # ─── Request/Response Models ────────────────────────────────────────────────
@@ -57,13 +71,10 @@ class AgentResponse(BaseModel):
     packetsProcessed: int
 
 
-class ThreatResponse(BaseModel):
+class ThreatLogResponse(BaseModel):
     id: int
     timestamp: str
-    sourceMac: str
-    attackType: str
-    tier: str
-    action: str
+    message: str
 
 
 class LedgerResponse(BaseModel):
@@ -184,7 +195,7 @@ async def get_agent(agent_id: str, sentinet_admin_session: Optional[str] = Cooki
 
 # ─── Threat/Incident Endpoints ────────────────────────────────────────────
 
-@app.get('/threats', response_model=List[ThreatResponse])
+@app.get('/threats', response_model=List[ThreatLogResponse])
 async def list_threats(sentinet_admin_session: Optional[str] = Cookie(None)):
     """Get list of threat log entries."""
     if not sentinet_admin_session:
@@ -194,7 +205,15 @@ async def list_threats(sentinet_admin_session: Optional[str] = Cookie(None)):
     if not digital_id:
         raise HTTPException(status_code=401, detail='Session expired')
     
-    return state.get_threats()
+    threats = state.get_threats()
+    return [
+        ThreatLogResponse(
+            id=t['id'],
+            timestamp=t['timestamp'],
+            message=f"[{t['tier']}] {t['attackType']} from {t['sourceMac']}. Action: {t['action']}"
+        )
+        for t in threats
+    ]
 
 
 # ─── Ledger Endpoints ────────────────────────────────────────────────────────
@@ -283,10 +302,65 @@ async def health():
     return {'status': 'ok'}
 
 
+# ─── Socket.io Events ────────────────────────────────────────────────────────
+
+sid_to_mac = {}
+
+@sio.event
+async def connect(sid, environ):
+    print(f"[WebSocket] Client connected: {sid}")
+
+@sio.event
+async def disconnect(sid):
+    print(f"[WebSocket] Client disconnected: {sid}")
+    mac = sid_to_mac.pop(sid, None)
+    if mac:
+        state.remove_agent(mac)
+
+@sio.event
+async def register_agent(sid, data):
+    print(f"[WebSocket] Agent registered: {data.get('name')} from {sid}")
+    mac = data.get("mac")
+    if mac:
+        sid_to_mac[sid] = mac
+    state.upsert_agent(data)
+
+@sio.event
+async def telemetry_report(sid, data):
+    mac = data.get("mac")
+    cpu = data.get("cpu", 0)
+    ram = data.get("ram", 0)
+    agent_state = data.get("state")
+    if mac:
+        state.update_agent_telemetry(mac, cpu, ram, agent_state)
+
+@sio.event
+async def attack_report(sid, data):
+    """
+    Handle incoming Attack Report from a SentiNet agent.
+    Expected data: {"sourceMac": "...", "attackType": "...", "tier": "...", "action": "...", "confidence": "..."}
+    """
+    print(f"[WebSocket] Received attack report from {sid}: {data}")
+    
+    source_mac = data.get("sourceMac")
+    attack_type = data.get("attackType", "Anomalous ARP")
+    tier = data.get("tier", "Tier 2")
+    action = data.get("action", "Blocked")
+    confidence = data.get("confidence", "99.9%")
+    
+    if source_mac:
+        # Save to threat log
+        state.add_threat(source_mac, attack_type, tier, action, confidence)
+        
+        # Broadcast to all other connected agents so they update their blacklists
+        print(f"[WebSocket] Broadcasting blacklist_update for {source_mac}")
+        await sio.emit("blacklist_update", {"mac": source_mac}, skip_sid=sid)
+
+
 if __name__ == '__main__':
     import uvicorn
     uvicorn.run(
-        app,
+        socket_app,
         host=config.ADMIN_API_HOST,
         port=config.ADMIN_API_PORT,
         log_level='info' if config.ADMIN_API_DEBUG else 'warning',

@@ -10,6 +10,13 @@ ADMIN_API_DEBUG = os.getenv('ADMIN_API_DEBUG', 'true').lower() == 'true'
 # Session/auth
 SESSION_TIMEOUT_SECONDS = 3600
 
+# MultiChain JSON-RPC
+MULTICHAIN_RPC_URL = os.getenv('MULTICHAIN_RPC_URL', 'http://127.0.0.1:4365')
+MULTICHAIN_RPC_USER = os.getenv('MULTICHAIN_RPC_USER', 'multichainrpc')
+MULTICHAIN_RPC_PASSWORD = os.getenv('MULTICHAIN_RPC_PASSWORD', 'secret')
+MULTICHAIN_STREAM_NAME = os.getenv('MULTICHAIN_STREAM_NAME', 'threat_logs')
+
+
 # Agent seed data
 DEFAULT_AGENTS = [
     {
