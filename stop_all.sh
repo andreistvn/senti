@@ -1,8 +1,8 @@
 #!/bin/bash
 
-echo "==========================================="
-echo "🛑 Stopping SentiNet Local Dev Environment"
-echo "==========================================="
+echo ""
+echo "Stopping SentiNet Local Dev Environment"
+echo ""
 
 stop_service() {
     local name=$1
@@ -29,4 +29,4 @@ stop_service "agent_dashboard"
 echo "Killing Agent Daemon (requires sudo)..."
 sudo pkill -f "sentinet_daemon.py"
 
-echo "✅ All SentiNet services stopped!"
+echo "All SentiNet services stopped!"

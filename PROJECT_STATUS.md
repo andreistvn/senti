@@ -6,12 +6,12 @@
 
 ## 1. Current Codebase Status
 
-The codebase has successfully scaffolded the primary runtime environments and IPC (Inter-Process Communication) plumbing, but currently relies on simulated data and localized inference to prove out the architecture.
+The codebase has successfully scaffolded the primary runtime environments and IPC (Inter-Process Communication) plumbing, and now uses real, live data persistence and evaluation to prove out the architecture.
 
 ### What is Completed:
-- **UI & Visualization Dashboards**: Both the `admin-dashboard` (IT network view) and `agent-dashboard` (local endpoint view) are built and functional. They successfully poll their respective backends but currently display mock or simulated telemetry.
+- **UI & Visualization Dashboards**: Both the `admin-dashboard` (IT network view) and `agent-dashboard` (local endpoint view) are built and functional. They have been successfully de-mocked to display live, real-time telemetry from their respective backends (SQLite for Admin, live traffic for Agent).
 - **Backend Infrastructures**: 
-  - `admin-backend`: A FastAPI server is running with SQLite database persistence via SQLAlchemy (`sentinet.db`). It also features a MultiChain JSON-RPC client to write threat logs to an immutable blockchain stream.
+  - `admin-backend`: A FastAPI server is running with SQLite database persistence via SQLAlchemy (`sentinet.db`). It includes a mocked MultiChain JSON-RPC client interface that currently catches connection errors and gracefully falls back to local SQLite logging.
   - `tray-app`: The privileged Python daemon is fully operational. It implements the dual-process architecture, handling system tray UI interactions via a local loopback API.
 - **Tier 1 (Fast-Filter)**: The `tray-app` daemon successfully uses Scapy to sniff raw ARP packets and performs an O(1) lookup against an in-memory Python `set()`. If a MAC address is blacklisted, it drops the packet.
 - **Tier 2 (Detective ML Engine)**: Fully integrated into `tray-app/sentinet_daemon.py` and `ml_engine.py`. Unknown MACs are evaluated via a 5-second sliding window that computes the 8-dimensional feature vector and executes an inference using the pre-trained `RandomForest` model.
@@ -22,7 +22,7 @@ The codebase has successfully scaffolded the primary runtime environments and IP
 - **Traffic Generation Scripts**: `traffic-gen/benign_traffic.py` and `traffic-gen/attack_generator.py` have been implemented to generate both normal benign traffic and malicious network traffic (ARP spoofing, MITM, high-volume flooding) within the Kali Linux testbed.
 
 ### What is Missing (The Gap):
-- **None!** All core architectural components, including database persistence, simplified authentication, and MultiChain integration, have been successfully implemented. The codebase is now fully aligned with the theoretical architecture of the thesis.
+- **MultiChain Ledger Implementation**: The `write_to_multichain` function in `admin-backend/state.py` is currently a placeholder shell that intentionally falls back to SQLite. The actual deployment, configuration, and integration of the true MultiChain blockchain stream still needs to be completed by a teammate.
 
 ---
 

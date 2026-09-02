@@ -1,8 +1,8 @@
 #!/bin/bash
 
-echo "==========================================="
-echo "🚀 Booting SentiNet Local Dev Environment"
-echo "==========================================="
+echo ""
+echo "Booting SentiNet Local Dev Environment"
+echo ""
 
 # Helper function to run a command in the background and log it
 start_service() {
@@ -49,7 +49,7 @@ start_service "tray_app" "tray-app" "python3 sentinet_tray.py"
 start_service "agent_dashboard" "agent-dashboard" "npm run dev"
 
 echo ""
-echo "✅ All services started in the background!"
+echo "All services started in the background!"
 echo "   - Admin Backend: http://localhost:8771"
 echo "   - Admin Dashboard: http://localhost:5175"
 echo "   - Agent Dashboard: http://localhost:5173"

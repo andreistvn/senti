@@ -1,7 +1,7 @@
 @echo off
-echo ===========================================
-echo 🚀 Booting SentiNet Local Dev Environment (Windows)
-echo ===========================================
+echo.
+echo Booting SentiNet Local Dev Environment (Windows)
+echo.
 
 echo Starting Admin Backend...
 start "Admin Backend" cmd /c "cd admin-backend && if exist venv\Scripts\activate (call venv\Scripts\activate) && python main.py"
@@ -19,7 +19,7 @@ echo Starting Agent Dashboard...
 start "Agent Dashboard" cmd /c "cd agent-dashboard && npm run dev"
 
 echo.
-echo ✅ All services started in separate windows!
+echo All services started in separate windows!
 echo    - Admin Backend: http://localhost:8771
 echo    - Admin Dashboard: http://localhost:5175
 echo    - Agent Dashboard: http://localhost:5173
