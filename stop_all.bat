@@ -1,4 +1,5 @@
 @echo off
+cd /d "%~dp0"
 echo.
 echo Stopping SentiNet Local Dev Environment (Windows)
 echo.
