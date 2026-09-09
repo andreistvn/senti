@@ -29,6 +29,7 @@ import psutil
 import scapy.all as scapy
 
 from ml_engine import MLEngine
+from bayanihan_client import BayanihanClient
 
 from config import AGENT_VERSION, SIM_TICK_SECONDS
 from ipc_protocol import (
@@ -208,26 +209,29 @@ class CaptureEngine(threading.Thread):
     Tier-2 Detective: For unknown MACs, evaluates via MLEngine.
     """
 
-    def __init__(self, state: DaemonState, ml_engine: MLEngine) -> None:
+    def __init__(self, state: DaemonState, ml_engine: MLEngine, bayanihan_client: BayanihanClient) -> None:
         super().__init__(daemon=True, name="capture-engine")
         self.state = state
         self.ml_engine = ml_engine
+        self.bayanihan_client = bayanihan_client
         self._stop = threading.Event()
 
     def stop(self) -> None:
         self._stop.set()
 
     def run(self) -> None:
-        try:
-            # We filter for ARP since this is an ARP-spoofing IDPS proof-of-concept
-            scapy.sniff(
-                filter="arp",
-                prn=self._process_packet,
-                store=False,
-                stop_filter=lambda _: self._stop.is_set()
-            )
-        except Exception as e:
-            print(f"[CaptureEngine] Sniffing failed or interrupted: {e}")
+        while not self._stop.is_set():
+            try:
+                # We filter for ARP since this is an ARP-spoofing IDPS proof-of-concept
+                scapy.sniff(
+                    filter="arp",
+                    prn=self._process_packet,
+                    store=False,
+                    stop_filter=lambda _: self._stop.is_set()
+                )
+            except Exception as e:
+                print(f"[CaptureEngine] Sniffing failed or interrupted: {e}")
+                time.sleep(1) # Prevent tight crash loops if interface goes down
 
     def _process_packet(self, pkt) -> None:
         # If protection is off, we don't inspect.
@@ -279,14 +283,16 @@ class CaptureEngine(threading.Thread):
                     self.state.events.appendleft(threat_event)
                     self.state.last_threat = threat_event
                     
-                # Phase 2 (Tier 3) will push this threat_event to the Relay Node
+                # Send to Relay Node via Bayanihan Layer
+                self.bayanihan_client.send_attack_report(threat_event)
 
 class TelemetryEngine(threading.Thread):
     """Background thread that tracks real CPU and memory usage."""
 
-    def __init__(self, state: DaemonState) -> None:
+    def __init__(self, state: DaemonState, bayanihan_client: BayanihanClient) -> None:
         super().__init__(daemon=True, name="telemetry-engine")
         self.state = state
+        self.bayanihan_client = bayanihan_client
         self._stop = threading.Event()
 
     def stop(self) -> None:
@@ -295,17 +301,22 @@ class TelemetryEngine(threading.Thread):
     def run(self) -> None:
         while not self._stop.is_set():
             time.sleep(SIM_TICK_SECONDS)
-            if not self.state.is_protected():
-                with self.state._lock:
-                    self.state.cpu = max(2.0, self.state.cpu * 0.8)
-                continue
-                
-            cpu = psutil.cpu_percent(interval=None)
-            mem = psutil.virtual_memory().percent
+            
+            is_protected = self.state.is_protected()
+            
+            if is_protected:
+                cpu = psutil.cpu_percent(interval=None)
+                mem = psutil.virtual_memory().percent
+            else:
+                cpu = 0
+                mem = 0
             
             with self.state._lock:
                 self.state.cpu = cpu
                 self.state.memory = mem
+                
+            if is_protected:
+                self.bayanihan_client.send_telemetry(cpu, mem, "PROTECTED")
 
 
 # ── Main Daemon ────────────────────────────────────────────────────────────────
@@ -314,10 +325,38 @@ class SentiNetDaemon:
     """Orchestrates the daemon's subsystems: state, simulation/capture, IPC."""
 
     def __init__(self) -> None:
+        import socket
+        import uuid
+        hostname = socket.gethostname()
+        mac_addr = ':'.join(['{:02x}'.format((uuid.getnode() >> ele) & 0xff) for ele in range(0,8*6,8)][::-1])
+        
+        # Determine actual local network IP instead of 127.x.x.x
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            # doesn't have to be reachable
+            s.connect(('10.254.254.254', 1))
+            ip_addr = s.getsockname()[0]
+        except Exception:
+            ip_addr = '127.0.0.1'
+        finally:
+            s.close()
+
+        agent_info = {
+            "name": hostname,
+            "ip": ip_addr,
+            "mac": mac_addr,
+            "state": "UNPROTECTED",
+        }
+        
         self.state = DaemonState()
         self.ml_engine = MLEngine()
-        self.capture = CaptureEngine(self.state, self.ml_engine)
-        self.telemetry = TelemetryEngine(self.state)
+        self.bayanihan_client = BayanihanClient(
+            relay_url="http://localhost:8771",
+            on_blacklist_update=self.state.add_to_blacklist,
+            agent_info=agent_info
+        )
+        self.capture = CaptureEngine(self.state, self.ml_engine, self.bayanihan_client)
+        self.telemetry = TelemetryEngine(self.state, self.bayanihan_client)
         self.ipc = IpcServer(on_message=self._handle_tray_message)
         self._stop = threading.Event()
 
@@ -325,6 +364,7 @@ class SentiNetDaemon:
         """Handle messages received from the unprivileged tray process."""
         if msg_type == MSG_TOGGLE_REQUEST:
             new_val = self.state.toggle()
+            self.bayanihan_client.set_enabled(new_val)
             self.ipc.broadcast(MSG_TOGGLE_ACK, {"protected": new_val})
             # Also push a full state update so the tray mirrors immediately.
             self.ipc.broadcast(MSG_STATE_UPDATE, self.state.snapshot())
@@ -335,7 +375,11 @@ class SentiNetDaemon:
             self._stop.wait(SIM_TICK_SECONDS)
             if self._stop.is_set():
                 break
-            self.ipc.broadcast(MSG_STATE_UPDATE, self.state.snapshot())
+            try:
+                self.ipc.broadcast(MSG_STATE_UPDATE, self.state.snapshot())
+                print("[BroadcastLoop] Tick", flush=True)
+            except Exception as e:
+                print(f"[BroadcastLoop] Failed: {e}")
 
     def run(self) -> None:
         """Start all subsystems and block until interrupted."""

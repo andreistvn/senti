@@ -130,9 +130,9 @@ class MLEngine:
             req_rate,
             rep_rate,
             req_rep_ratio,
+            unique_ip_count,
             ia_mean,
             ia_var,
             burstiness,
-            unique_ip_count,
             gratuitous
         ]

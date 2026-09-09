@@ -171,21 +171,21 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
             </div>
 
             <div className="bg-white border border-[#cccccc]">
-              <PanelHeader icon={<Database className="w-4 h-4 text-[#1a4fd6]" strokeWidth={2} />} title="Memory Usage" />
+              <PanelHeader icon={<Database className="w-4 h-4 text-[#1a4fd6]" strokeWidth={2} />} title="System RAM Usage" />
               <div className="p-5 flex flex-col items-center">
                 <div className="relative w-28 h-28">
                   <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
                     <circle cx="50" cy="50" r="42" stroke="#e0e0e0" strokeWidth="10" fill="none" />
                     <circle cx="50" cy="50" r="42" stroke="#1a4fd6" strokeWidth="10" fill="none"
                       strokeDasharray={`${2 * Math.PI * 42}`}
-                      strokeDashoffset={`${2 * Math.PI * 42 * (1 - eMemory / 256)}`}
+                      strokeDashoffset={`${2 * Math.PI * 42 * (1 - eMemory / 100)}`}
                     />
                   </svg>
                   <div className="absolute inset-0 flex items-center justify-center">
-                    <span className="text-[#111] text-base font-bold">{eMemory} MB</span>
+                    <span className="text-[#111] text-base font-bold">{typeof eMemory === 'number' ? eMemory.toFixed(1) : eMemory}%</span>
                   </div>
                 </div>
-                <p className="text-[#888] text-[10px] tracking-wider mt-2">Out of 256 MB allocated</p>
+                <p className="text-[#888] text-[10px] tracking-wider mt-2">Total Machine Memory</p>
               </div>
             </div>
 
@@ -193,9 +193,9 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               <PanelHeader icon={<TrendingUp className="w-4 h-4 text-[#1a4fd6]" strokeWidth={2} />} title="Traffic Throughput (PPS)" />
               <div className="p-5 space-y-3">
                 {[
-                  { label: 'INSPECTED', value: eInspected.toLocaleString(), pct: 82, color: '#1a4fd6', textColor: '#111', hideBar: true },
-                  { label: 'DROPPED',   value: eDropped.toLocaleString(),   pct: Math.min(eInspected ? eDropped / eInspected * 100 : 0, 30), color: '#c0392b', textColor: '#c0392b' },
-                  { label: 'PASSED',    value: ePassed.toLocaleString(),    pct: 90, color: '#00aa55', textColor: '#00aa55' },
+                  { label: 'INSPECTED', value: eInspected.toLocaleString(), pct: 100, color: '#1a4fd6', textColor: '#111', hideBar: true },
+                  { label: 'DROPPED',   value: eDropped.toLocaleString(),   pct: eInspected > 0 ? (eDropped / eInspected) * 100 : 0, color: '#c0392b', textColor: '#c0392b' },
+                  { label: 'PASSED',    value: ePassed.toLocaleString(),    pct: eInspected > 0 ? (ePassed / eInspected) * 100 : 0, color: '#00aa55', textColor: '#00aa55' },
                 ].map(item => (
                   <div key={item.label}>
                     <div className="flex items-center justify-between mb-1">
@@ -265,12 +265,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                   <p className="text-[#555] text-[10px] tracking-wider mb-3">
                     Your node submitted <span className="text-[#0d1b3e] font-bold">{eSigContrib} threat signatures</span> to the blockchain today.
                   </p>
-                  <div className="bg-[#f0f7ff] border border-[#1a4fd6]/30 px-3 py-2">
-                    <div className="flex items-center gap-2">
-                      <Users className="w-3 h-3 text-[#1a4fd6]" />
-                      <span className="text-[#1a4fd6] text-[10px] tracking-wider font-bold">Protecting {eUsersProtected} other users today</span>
-                    </div>
-                  </div>
+
                 </div>
               </div>
 

@@ -90,11 +90,15 @@ def build(state: AgentState):
         title="SentiNet Agent",
         menu=menu,
     )
+    last_protected = [None]
 
     # keep the tray icon in sync when state changes via IPC
     def refresh():
-        icon.icon = make_icon_image(state.is_protected())
-        icon.update_menu()
+        current_state = state.is_protected()
+        if last_protected[0] != current_state:
+            icon.icon = make_icon_image(current_state)
+            icon.update_menu()
+            last_protected[0] = current_state
 
     state.on_change(refresh)
     return icon

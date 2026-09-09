@@ -1,0 +1,9 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=SentiNet Agent Dashboard
+Comment=Launch the SentiNet Local Web Dashboard
+Exec=bash -c "cd {{INSTALL_DIR}}/agent-dashboard && npm run dev"
+Icon=web-browser
+Terminal=true
+Categories=Network;Security;

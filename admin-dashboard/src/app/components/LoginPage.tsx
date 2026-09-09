@@ -59,7 +59,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
     let p = 0;
     
     const t = setInterval(() => {
-      p += Math.floor(Math.random() * 12) + 6;
+      p += 15;
       setScanProgress(Math.min(p, 100));
       
       if (p >= 100) {

@@ -10,7 +10,7 @@ export interface AdminAgent {
   name: string;
   ip: string;
   mac: string;
-  state: 'PROTECTED' | 'DETECTING' | 'SYNCING';
+  state: 'PROTECTED' | 'DETECTING' | 'SYNCING' | 'UNPROTECTED';
   syncProgress: number;
   cpu: number;
   ram: number;
@@ -86,33 +86,17 @@ export const ADMIN_CREDENTIALS = {
 } as const;
 
 const ADMIN_DASHBOARD_SEED: AdminDashboardSeed = {
-  agents: [
-    { id: 'A', name: 'Agent Alpha', ip: '192.168.10.101', mac: 'AA:BB:CC:DD:EE:01', state: 'PROTECTED', syncProgress: 0, cpu: 18, ram: 42, connectedSince: '08:14:02', packetsProcessed: 142830 },
-    { id: 'B', name: 'Agent Bravo', ip: '192.168.10.102', mac: 'AA:BB:CC:DD:EE:02', state: 'PROTECTED', syncProgress: 0, cpu: 22, ram: 51, connectedSince: '08:14:07', packetsProcessed: 138420 },
-    { id: 'C', name: 'Agent Charlie', ip: '192.168.10.103', mac: 'AA:BB:CC:DD:EE:03', state: 'PROTECTED', syncProgress: 0, cpu: 15, ram: 37, connectedSince: '08:15:11', packetsProcessed: 159012 },
-    { id: 'D', name: 'Agent Delta', ip: '192.168.10.104', mac: 'AA:BB:CC:DD:EE:04', state: 'PROTECTED', syncProgress: 0, cpu: 31, ram: 58, connectedSince: '08:15:33', packetsProcessed: 121765 },
-  ],
-  logs: [
-    { id: 1, timestamp: '14:30:00', message: 'SYSTEM: POC-Control-Hub Initialized.' },
-    { id: 2, timestamp: '14:30:02', message: 'NETWORK: MultiChain connected successfully.' },
-    { id: 3, timestamp: '14:30:05', message: 'SOCKET: Listening on port 8080.' },
-  ],
-  ledger: [
-    { blockId: '0x8A12', timestamp: '14:28:11', macHash: 'FD:09:A1:XX', score: '98.2%' },
-    { blockId: '0x8A13', timestamp: '14:29:05', macHash: 'E2:11:4B:XX', score: '94.5%' },
-  ],
-  telemetry: { cpu: 12, ram: 44, latency: 14 },
+  agents: [],
+  logs: [],
+  ledger: [],
+  telemetry: { cpu: 0, ram: 0, latency: 0 },
   blockchainMetrics: {
-    blockHeight: 33912,
-    lastSyncTime: '14:30:05',
+    blockHeight: 0,
+    lastSyncTime: '--:--:--',
     chainStatus: 'HEALTHY',
-    totalIncidents: 47,
+    totalIncidents: 0,
   },
-  threatHistory: Array.from({ length: 20 }, (_, i) => ({
-    time: `${String(14 + Math.floor(i / 4)).padStart(2, '0')}:${String((i * 15) % 60).padStart(2, '0')}:00`,
-    pps: Math.floor(Math.random() * 180) + 40,
-    blocked: Math.floor(Math.random() * 140) + 30,
-  })),
+  threatHistory: [],
   policyConfig: {
     mlThreshold: 0.50,
     arpFloodLimit: 1000,
@@ -167,6 +151,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   try {
     const response = await fetch(`${ADMIN_API_BASE_URL}${path}`, {
       ...init,
+      credentials: 'include',
       signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',

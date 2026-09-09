@@ -13,3 +13,4 @@ scikit-learn
 joblib
 pandas
 numpy
+python-socketio[client]>=5.11.0

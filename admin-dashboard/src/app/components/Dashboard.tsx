@@ -10,7 +10,7 @@ import { getAdminDashboardSeed, getAdminDashboardSeedFallback } from '../lib/adm
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type AgentState = 'PROTECTED' | 'DETECTING' | 'SYNCING';
+type AgentState = 'PROTECTED' | 'DETECTING' | 'SYNCING' | 'UNPROTECTED';
 
 interface Agent {
   id: string;
@@ -38,14 +38,8 @@ function now(): string {
 }
 
 function randomHex(bytes: number): string {
-  return Array.from({ length: bytes }, () => Math.floor(Math.random()*256).toString(16).toUpperCase().padStart(2,'0')).join(':');
-}
-
-function generateThreatPoint(prevPPS = 150, attackActive = false): ThreatDataPoint {
-  const base   = attackActive ? Math.min(prevPPS + Math.random() * 200, 1800) : Math.max(prevPPS - Math.random() * 80, 30);
-  const pps    = Math.round(base + (Math.random() - 0.5) * 60);
-  const blocked = Math.round(pps * (0.75 + Math.random() * 0.2));
-  return { time: now(), pps: Math.max(10, pps), blocked: Math.min(blocked, pps) };
+  // Replace random with simple hex based on timestamp for POC
+  return Array.from({ length: bytes }, (_, i) => ((Date.now() + i) % 256).toString(16).toUpperCase().padStart(2,'0')).join(':');
 }
 
 // ─── CSV Export ───────────────────────────────────────────────────────────────
@@ -151,120 +145,36 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     prevLedgerSnapshotRef.current = { length: ledger.length, scrollTop: c.scrollTop, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight };
   }, [ledger]);
 
-  // ── Main simulation interval ───────────────────────────────────────────────
+  // ── Main polling interval ───────────────────────────────────────────────
   useEffect(() => {
-    const sim = setInterval(() => {
+    let alive = true;
+    const poll = setInterval(async () => {
+      try {
+        const seed = await getAdminDashboardSeed();
+        if (!alive) return;
+        setAgents(seed.agents);
+        setLedger(seed.ledger);
+        setTelemetry(seed.telemetry);
+        setBlockchainMetrics(seed.blockchainMetrics);
+        setThreatHistory(seed.threatHistory);
+        setPolicyConfig(seed.policyConfig);
+        
+        // Let's only update logs if they are significantly different to avoid overwriting manual local logs completely
+        // For POC, we will just use backend logs + local logs
+        setLogs(prev => {
+           // simple merge or just use backend
+           return seed.logs.length > 0 ? seed.logs : prev;
+        });
+      } catch (err) {
+        console.error("Polling failed", err);
+      }
+    }, 2000);
 
-      // Threat history + sustained-attack detection
-      setThreatHistory(prev => {
-        const lastPPS  = prev[prev.length - 1]?.pps ?? 150;
-        const isAttack = attackActiveRef.current;
-        const point    = generateThreatPoint(lastPPS, isAttack);
-        prevPPSRef.current = point.pps;
-
-        if (point.pps >= policyConfig.arpFloodLimit) {
-          const elapsed = Date.now() - lastAlertRef.current;
-          if (elapsed > 20_000) {
-            lastAlertRef.current = Date.now();
-            toast.error(
-              `CRITICAL: ARP Flood Detected — ${point.pps.toLocaleString()} PPS (limit: ${policyConfig.arpFloodLimit})`,
-              {
-                duration: 8000,
-                style: {
-                  background: '#0F172A',
-                  border: '2px solid #DC2626',
-                  color: '#fff',
-                  borderRadius: 0,
-                  fontFamily: 'JetBrains Mono, monospace',
-                  fontSize: '12px',
-                },
-              }
-            );
-          }
-        }
-        return [...prev.slice(-29), point];
-      });
-
-      // Agent simulation
-      setAgents(prev => {
-        const next = [...prev];
-        const protected_ = next.filter(a => a.state === 'PROTECTED');
-
-        if (protected_.length > 0 && Math.random() > 0.7) {
-          const target = protected_[Math.floor(Math.random() * protected_.length)];
-          const idx    = next.findIndex(a => a.id === target.id);
-          next[idx] = { ...target, state: 'DETECTING' };
-          attackActiveRef.current = true;
-
-          const ts = now();
-          setLogs(l => [...l, { id: logIdCounter.current++, timestamp: ts, message: `ALERT: ${target.name} detected ARP Spoofing. Broadcasting MAC to network...` }].slice(-100));
-
-          setTimeout(() => {
-            setAgents(cur => {
-              const u = [...cur];
-              const i = u.findIndex(a => a.id === target.id);
-              if (i > -1) u[i] = { ...u[i], state: 'SYNCING', syncProgress: 0 };
-              return u;
-            });
-
-            let prog = 0;
-            const progInt = setInterval(() => {
-              prog += 15;
-              if (prog >= 100) {
-                clearInterval(progInt);
-                attackActiveRef.current = false;
-                setAgents(cur => {
-                  const u = [...cur];
-                  const i = u.findIndex(a => a.id === target.id);
-                  if (i > -1) u[i] = { ...u[i], state: 'PROTECTED', syncProgress: 0 };
-                  return u;
-                });
-                const ts2 = now();
-                setLogs(l => [...l, { id: logIdCounter.current++, timestamp: ts2, message: `SYSTEM: ${target.name} Bayanihan Sync complete. Threat isolated.` }].slice(-100));
-                setLedger(lg => [{
-                  blockId:   `0x${Math.floor(Math.random()*65536).toString(16).toUpperCase().padStart(4,'0')}`,
-                  timestamp: ts2,
-                  macHash:   `${randomHex(2)}:XX:XX`,
-                  score:     `${(Math.random()*5+94).toFixed(1)}%`,
-                }, ...lg.slice(0, 19)]);
-                setBlockchainMetrics(m => ({
-                  ...m,
-                  blockHeight:    m.blockHeight + 1,
-                  lastSyncTime:   ts2,
-                  totalIncidents: m.totalIncidents + 1,
-                }));
-              } else {
-                setAgents(cur => {
-                  const u = [...cur];
-                  const i = u.findIndex(a => a.id === target.id);
-                  if (i > -1) u[i] = { ...u[i], syncProgress: prog };
-                  return u;
-                });
-              }
-            }, 300);
-          }, 3000);
-        }
-
-        return next.map(a => ({
-          ...a,
-          cpu: a.state === 'DETECTING'
-            ? Math.min(a.cpu + Math.floor(Math.random() * 30) + 15, 98)
-            : Math.max(10, Math.floor(Math.random() * 30) + 12),
-          ram: Math.max(30, Math.floor(Math.random() * 20) + 40),
-          packetsProcessed: a.packetsProcessed + Math.floor(Math.random() * 800) + 200,
-        }));
-      });
-
-      setTelemetry({
-        cpu:     Math.floor(Math.random() * 25) + 10,
-        ram:     Math.floor(Math.random() * 15) + 40,
-        latency: Math.floor(Math.random() * 8)  + 12,
-      });
-    }, 4000);
-
-    return () => clearInterval(sim);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [policyConfig.arpFloodLimit]);
+    return () => {
+      alive = false;
+      clearInterval(poll);
+    };
+  }, []);
 
   // ── Action handlers ────────────────────────────────────────────────────────
 
@@ -272,7 +182,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     const ts = now();
     setLogs(l => [...l, { id: logIdCounter.current++, timestamp: ts, message: 'ADMIN: Manual Blacklist Injection executed (SOP 3).' }]);
     setLedger(lg => [{
-      blockId: `0x${Math.floor(Math.random()*65536).toString(16).toUpperCase().padStart(4,'0')}`,
+      blockId: `0x${(Date.now() % 65536).toString(16).toUpperCase().padStart(4,'0')}`,
       timestamp: ts, macHash: 'FF:FF:FF:XX', score: '100.0%',
     }, ...lg.slice(0,19)]);
     toast('Manual Blacklist Injection executed.', {
@@ -399,25 +309,30 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                     <td className="p-3 border-r border-[#e2e8f0] font-['JetBrains_Mono',_monospace]">{agent.ip}</td>
                     <td className="p-3 border-r border-[#e2e8f0] font-['JetBrains_Mono',_monospace]">{agent.mac}</td>
                     <td className="p-3 border-r border-[#e2e8f0]">
-                      <div className="flex flex-col gap-1 w-36">
-                        <div className="flex justify-between text-[9px] font-bold uppercase">
-                          <span>CPU</span>
-                          <span className={`font-['JetBrains_Mono',_monospace] ${agent.cpu > 70 ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>{agent.cpu}%</span>
+                      {agent.state === 'UNPROTECTED' ? (
+                        <div className="text-[#94A3B8] font-bold text-center">-</div>
+                      ) : (
+                        <div className="flex flex-col gap-1 w-36">
+                          <div className="flex justify-between text-[9px] font-bold uppercase">
+                            <span>CPU</span>
+                            <span className={`font-['JetBrains_Mono',_monospace] ${agent.cpu > 70 ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>{agent.cpu}%</span>
+                          </div>
+                          <div className="h-1.5 border border-[#e2e8f0] bg-white">
+                            <div className={`h-full transition-all duration-500 ${agent.cpu > 70 ? 'bg-[#DC2626]' : 'bg-[#1E3A8A]'}`} style={{ width: `${agent.cpu}%` }} />
+                          </div>
+                          <div className="flex justify-between text-[9px] font-bold uppercase">
+                            <span>RAM</span>
+                            <span className="font-['JetBrains_Mono',_monospace] text-[#0F172A]">{agent.ram}%</span>
+                          </div>
+                          <div className="h-1.5 border border-[#e2e8f0] bg-white">
+                            <div className="h-full bg-[#16A34A] transition-all duration-500" style={{ width: `${agent.ram}%` }} />
+                          </div>
                         </div>
-                        <div className="h-1.5 border border-[#e2e8f0] bg-white">
-                          <div className={`h-full transition-all duration-500 ${agent.cpu > 70 ? 'bg-[#DC2626]' : 'bg-[#1E3A8A]'}`} style={{ width: `${agent.cpu}%` }} />
-                        </div>
-                        <div className="flex justify-between text-[9px] font-bold uppercase">
-                          <span>RAM</span>
-                          <span className="font-['JetBrains_Mono',_monospace] text-[#0F172A]">{agent.ram}%</span>
-                        </div>
-                        <div className="h-1.5 border border-[#e2e8f0] bg-white">
-                          <div className="h-full bg-[#16A34A] transition-all duration-500" style={{ width: `${agent.ram}%` }} />
-                        </div>
-                      </div>
+                      )}
                     </td>
-                    <td className={`p-3 font-black uppercase tracking-widest w-64 ${agent.state === 'PROTECTED' ? 'text-[#16A34A] bg-[#F1F5F9]' : ''} ${agent.state === 'DETECTING' ? 'text-white bg-[#DC2626] animate-pulse' : ''} ${agent.state === 'SYNCING' ? 'bg-[#F1F5F9]' : ''}`}>
+                    <td className={`p-3 font-black uppercase tracking-widest w-64 ${agent.state === 'PROTECTED' ? 'text-[#16A34A] bg-[#F1F5F9]' : ''} ${agent.state === 'DETECTING' ? 'text-white bg-[#DC2626] animate-pulse' : ''} ${agent.state === 'SYNCING' ? 'bg-[#F1F5F9]' : ''} ${agent.state === 'UNPROTECTED' ? 'text-[#94A3B8] bg-[#F8FAFC]' : ''}`}>
                       {agent.state === 'PROTECTED' && 'PROTECTED'}
+                      {agent.state === 'UNPROTECTED' && 'UNPROTECTED'}
                       {agent.state === 'DETECTING' && <div className="flex items-center gap-2"><ShieldAlert className="w-5 h-5" />ATTACK DETECTED</div>}
                       {agent.state === 'SYNCING' && (
                         <div>
@@ -483,16 +398,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               ))}
             </div>
 
-            {/* Sync Progress */}
-            <div className="p-4 border-b border-[#e2e8f0]">
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[#94A3B8] text-[9px] tracking-widest uppercase font-bold">SYNC PROGRESS</span>
-                <span className="text-[#64748B] text-[9px] tracking-wider font-bold">94% complete — Block {`#${String(blockchainMetrics.blockHeight).padStart(8,'0')}`}</span>
-              </div>
-              <div className="w-full bg-[#e0e0e0] h-2.5">
-                <div className="bg-[#1a73e8] h-2.5 transition-all duration-500" style={{ width: '94%' }} />
-              </div>
-            </div>
+
 
             <div ref={ledgerContainerRef} className="flex-1 overflow-auto" style={{ maxHeight: 180 }}>
               <table className="w-full text-left border-collapse font-['JetBrains_Mono',_monospace] text-sm">
