@@ -140,7 +140,6 @@ export default function Register() {
       {/* Header */}
       <header className="bg-[#08273f] border-b border-[#e6eef7] px-6 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <Shield className="w-5 h-5 text-white" strokeWidth={2} />
           <span className="text-white tracking-widest text-sm font-bold uppercase">SENTINET — REGISTRATION</span>
         </div>
         <div className="flex items-center gap-4 text-xs">

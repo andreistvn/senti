@@ -231,15 +231,14 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   ];
 
   return (
-    <div className="min-h-screen w-full bg-[#e8eaed] flex flex-col p-4 font-['Inter',_sans-serif] text-slate-900 gap-4 box-border antialiased">
+    <div className="min-h-screen bg-[#e8eaed] flex flex-col text-slate-900 antialiased">
       {/* Toaster for push notifications */}
       <Toaster position="top-right" />
 
       {/* Header */}
       <header className="bg-[#0d1b3e] border-b-2 border-[#c0392b] px-6 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <Shield className="w-5 h-5 text-white" />
-          <span className="text-white tracking-widest text-sm font-bold">Relay Node: POC-Control-Hub</span>
+          <span className="text-white tracking-widest text-sm font-bold uppercase">Admin Sentinet</span>
         </div>
         <div className="flex items-center gap-6 text-xs text-[#8899bb]">
           <span className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-sm bg-[#00aa55]" />MultiChain: Active</span>
@@ -268,6 +267,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         </div>
       </div>
 
+      <main className="flex-1 p-4 flex flex-col gap-4 overflow-auto">
       {/* ── Analytics Tab ── */}
       {activeTab === 'analytics' && (
         <ThreatAnalyticsTab data={threatHistory} arpFloodLimit={policyConfig.arpFloodLimit} />
@@ -464,6 +464,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         </section>
 
       </>}
+      </main>
     </div>
   );
 }

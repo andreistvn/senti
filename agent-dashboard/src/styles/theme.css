@@ -1,7 +1,7 @@
 @custom-variant dark (&:is(.dark *));
 
 :root {
-  --font-sans: 'Inter', system-ui, sans-serif;
+  --font-sans: 'Poppins', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'Roboto Mono', monospace;
   --font-size: 16px;
   --background: #ffffff;

@@ -78,8 +78,7 @@ export default function AgentToggle({ onOpenDashboard }: AgentToggleProps) {
         {/* ── Title bar ── */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-[#1e3a5f] bg-[#0d1b3e] shrink-0">
           <div className="flex items-center gap-2">
-            <Shield className="w-4 h-4 text-[#00ccaa]" strokeWidth={2} />
-            <span className="text-white text-xs font-semibold tracking-wider">SentiNet Agent</span>
+            <span className="text-white text-xs font-semibold tracking-wider">Sentinet Agent</span>
           </div>
           <div className="flex items-center gap-2">
             <span className="text-[#8899bb] text-[10px] tracking-wider">DICT Wi-Fi</span>
