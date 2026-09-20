@@ -43,8 +43,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       {/* Header */}
       <header className="bg-[#0d1b3e] border-b-2 border-[#c0392b] px-6 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <Shield className="w-5 h-5 text-white" strokeWidth={2} />
-          <span className="text-white tracking-widest text-sm font-bold uppercase">SentiNet Agent Dashboard</span>
+          <span className="text-white tracking-widest text-sm font-bold uppercase">SentiNet Agent</span>
         </div>
         <div className="flex items-center gap-6 text-xs">
           <span className="text-[#8899bb] tracking-wider">192.168.1.42 / A4:5E:60:E2:3B:1C</span>
