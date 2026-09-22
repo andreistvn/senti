@@ -21,3 +21,8 @@ __pycache__/
 # Ignore ML datasets
 *.csv
 model-training/venv/
+analysis_results.md
+
+# Generated runtime config (contains MultiChain RPC credentials)
+.env
+!.env.example
