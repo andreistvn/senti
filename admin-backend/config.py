@@ -7,6 +7,18 @@ ADMIN_API_HOST = os.getenv('ADMIN_API_HOST', '127.0.0.1')
 ADMIN_API_PORT = int(os.getenv('ADMIN_API_PORT', '8771'))
 ADMIN_API_DEBUG = os.getenv('ADMIN_API_DEBUG', 'true').lower() == 'true'
 
+# Browser origins allowed to call the API. The defaults cover a dashboard opened on
+# the relay machine itself; on a multi-machine testbed add the relay's LAN origin
+# (e.g. http://192.168.10.10:5175) — launch_scripts/start_relay_node.sh does this.
+ADMIN_CORS_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv(
+        'ADMIN_CORS_ORIGINS',
+        'http://localhost:5175,http://127.0.0.1:5175,http://localhost:5173,http://127.0.0.1:5173',
+    ).split(',')
+    if origin.strip()
+]
+
 # Session/auth
 SESSION_TIMEOUT_SECONDS = 3600
 
