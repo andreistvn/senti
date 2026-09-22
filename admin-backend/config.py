@@ -11,10 +11,23 @@ ADMIN_API_DEBUG = os.getenv('ADMIN_API_DEBUG', 'true').lower() == 'true'
 SESSION_TIMEOUT_SECONDS = 3600
 
 # MultiChain JSON-RPC
+MULTICHAIN_ENABLED = os.getenv('MULTICHAIN_ENABLED', 'true').lower() == 'true'
 MULTICHAIN_RPC_URL = os.getenv('MULTICHAIN_RPC_URL', 'http://127.0.0.1:4365')
 MULTICHAIN_RPC_USER = os.getenv('MULTICHAIN_RPC_USER', 'multichainrpc')
 MULTICHAIN_RPC_PASSWORD = os.getenv('MULTICHAIN_RPC_PASSWORD', 'secret')
 MULTICHAIN_STREAM_NAME = os.getenv('MULTICHAIN_STREAM_NAME', 'threat_logs')
+
+# Seconds to wait on a single JSON-RPC call before treating the node as unreachable.
+MULTICHAIN_RPC_TIMEOUT = float(os.getenv('MULTICHAIN_RPC_TIMEOUT', '5.0'))
+# Create + subscribe to the threat stream automatically if the node doesn't have it.
+MULTICHAIN_AUTO_CREATE_STREAM = os.getenv('MULTICHAIN_AUTO_CREATE_STREAM', 'true').lower() == 'true'
+# How often the background worker refreshes chain health and resyncs the ledger mirror.
+MULTICHAIN_SYNC_INTERVAL = float(os.getenv('MULTICHAIN_SYNC_INTERVAL', '10.0'))
+# Threat records buffered while the node is unreachable before we start dropping.
+MULTICHAIN_QUEUE_SIZE = int(os.getenv('MULTICHAIN_QUEUE_SIZE', '1000'))
+MULTICHAIN_MAX_PUBLISH_ATTEMPTS = int(os.getenv('MULTICHAIN_MAX_PUBLISH_ATTEMPTS', '5'))
+# Number of recent stream items pulled back on each reconciliation pass.
+MULTICHAIN_LEDGER_FETCH_COUNT = int(os.getenv('MULTICHAIN_LEDGER_FETCH_COUNT', '200'))
 
 
 # Agent seed data

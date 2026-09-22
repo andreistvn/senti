@@ -1,23 +1,26 @@
 """
 Admin backend state management using SQLite (via SQLAlchemy) and MultiChain JSON-RPC.
+
+The SQLite `ledger_entries` table is a *mirror* of the MultiChain threat stream, not
+the ledger itself: the background worker in multichain.py writes confirmed
+transactions into it and periodically reconciles it against what is on-chain, so the
+dashboard can render the ledger without blocking on RPC round-trips.
 """
 
 import time
 import uuid
-import requests
 from datetime import datetime
 from typing import Optional, Dict, List, Any
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean
+from sqlalchemy import create_engine, inspect, text, Column, Integer, String, Float, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker
 
+import multichain
 from config import (
-    DEFAULT_AGENTS, 
+    DEFAULT_AGENTS,
     SESSION_TIMEOUT_SECONDS,
-    MULTICHAIN_RPC_URL,
-    MULTICHAIN_RPC_USER,
-    MULTICHAIN_RPC_PASSWORD,
-    MULTICHAIN_STREAM_NAME
+    MULTICHAIN_ENABLED,
+    MULTICHAIN_STREAM_NAME,
 )
 
 # Admin credentials (kept in memory for POC)
@@ -73,10 +76,12 @@ class DBThreat(Base):
 
 class DBLedgerEntry(Base):
     __tablename__ = "ledger_entries"
-    block_id = Column(String, primary_key=True)
+    block_id = Column(String, primary_key=True)   # txid prefix, shown in the dashboard
+    txid = Column(String, index=True)             # full MultiChain transaction id
     timestamp = Column(String)
     mac_hash = Column(String)
     score = Column(String)
+    created_at = Column(Float)                    # local insert time, for stable ordering
 
 class DBPolicy(Base):
     __tablename__ = "policy"
@@ -101,6 +106,31 @@ class DBAgent(Base):
     packets_processed = Column(Integer)
 
 Base.metadata.create_all(bind=engine)
+
+
+def _migrate_schema():
+    """
+    Add columns introduced after a database was first created.
+
+    `create_all` only creates missing *tables*, so an existing sentinet.db would
+    otherwise keep the old ledger_entries shape and blow up on the new columns.
+    """
+    inspector = inspect(engine)
+    if 'ledger_entries' not in inspector.get_table_names():
+        return
+
+    existing = {col['name'] for col in inspector.get_columns('ledger_entries')}
+    additions = {'txid': 'VARCHAR', 'created_at': 'FLOAT'}
+
+    with engine.begin() as conn:
+        for name, sql_type in additions.items():
+            if name not in existing:
+                conn.execute(text(f'ALTER TABLE ledger_entries ADD COLUMN {name} {sql_type}'))
+                print(f'[DB] Migrated ledger_entries: added column {name}.')
+
+
+_migrate_schema()
+
 
 def _seed_db():
     db = SessionLocal()
@@ -171,53 +201,128 @@ def remove_agent(mac: str) -> None:
 
 # ─── MultiChain Integration ────────────────────────────────────────────────
 
-def write_to_multichain(threat_dict: dict):
+def _mirror_ledger_entry(entry: Dict[str, Any]) -> None:
     """
-    Write threat metadata to the permissioned MultiChain stream via JSON-RPC.
+    Persist one confirmed on-chain publication into the local mirror.
+
+    Called from the ledger worker thread once MultiChain has accepted the
+    transaction, so a row here always corresponds to a real txid.
     """
-    payload = {
-        "method": "publish",
-        "params": [
-            MULTICHAIN_STREAM_NAME,
-            threat_dict["sourceMac"], # Key
-            {
-                "json": {
-                    "timestamp": threat_dict["timestamp"],
-                    "attackType": threat_dict["attackType"],
-                    "score": threat_dict.get("confidence", "99.9%")
-                }
-            }
-        ],
-        "id": str(uuid.uuid4())
-    }
-    
+    db = SessionLocal()
     try:
-        response = requests.post(
-            MULTICHAIN_RPC_URL,
-            json=payload,
-            auth=(MULTICHAIN_RPC_USER, MULTICHAIN_RPC_PASSWORD),
-            timeout=2.0
-        )
-        if response.status_code == 200:
-            result = response.json().get("result")
-            print(f"[MultiChain] Successfully published threat to stream: {result}")
-            
-            # Log the ledger entry in our SQLite DB for the dashboard
-            db = SessionLocal()
-            db_ledger = DBLedgerEntry(
-                block_id=result[:8] if result else "0xNEW", # Use txid snippet as blockId for POC
-                timestamp=threat_dict["timestamp"],
-                mac_hash=threat_dict["sourceMac"],
-                score=threat_dict.get("confidence", "99.9%")
-            )
-            db.add(db_ledger)
-            db.commit()
-            db.close()
+        existing = db.query(DBLedgerEntry).filter(DBLedgerEntry.block_id == entry['blockId']).first()
+        if existing:
+            existing.txid = entry.get('txid', existing.txid)
+            existing.timestamp = entry['timestamp']
+            existing.mac_hash = entry['macHash']
+            existing.score = entry['score']
         else:
-            print(f"[MultiChain] RPC Error ({response.status_code}): {response.text}")
-    except requests.exceptions.RequestException as e:
-        print(f"[MultiChain] Connection Error: {e}")
-        print("[MultiChain] Warning: Is your MultiChain node running? Skipping ledger write for now.")
+            db.add(DBLedgerEntry(
+                block_id=entry['blockId'],
+                txid=entry.get('txid'),
+                timestamp=entry['timestamp'],
+                mac_hash=entry['macHash'],
+                score=entry['score'],
+                created_at=time.time(),
+            ))
+        db.commit()
+    finally:
+        db.close()
+
+
+def _reconcile_ledger(entries: List[Dict[str, Any]]) -> None:
+    """
+    Fold the stream items read back from the chain into the local mirror.
+
+    Anything published by a *peer* relay node arrives through here, which is what
+    keeps the Bayanihan ledger view consistent across the federation rather than
+    showing only this node's own writes.
+    """
+    if not entries:
+        return
+
+    db = SessionLocal()
+    try:
+        known = {row.block_id for row in db.query(DBLedgerEntry.block_id).all()}
+        now = time.time()
+        added = 0
+
+        for entry in entries:
+            if entry['blockId'] in known:
+                continue
+            db.add(DBLedgerEntry(
+                block_id=entry['blockId'],
+                txid=entry.get('txid'),
+                timestamp=entry['timestamp'],
+                mac_hash=entry['macHash'],
+                score=entry['score'],
+                created_at=now,
+            ))
+            known.add(entry['blockId'])
+            added += 1
+
+        if added:
+            db.commit()
+            print(f'[MultiChain] Reconciled {added} ledger entr{"y" if added == 1 else "ies"} from the chain.')
+    finally:
+        db.close()
+
+
+# The client and worker own every blocking RPC call; nothing on the request path
+# talks to the node directly.
+_client = multichain.MultiChainClient()
+_ledger_worker = multichain.LedgerWorker(
+    _client,
+    on_published=_mirror_ledger_entry,
+    on_reconciled=_reconcile_ledger,
+)
+
+
+def start_ledger_worker() -> None:
+    """Start the MultiChain publisher/sync thread. Called from the FastAPI lifespan."""
+    if not MULTICHAIN_ENABLED:
+        print('[MultiChain] Disabled via MULTICHAIN_ENABLED=false — ledger writes will be skipped.')
+        return
+    _ledger_worker.start()
+
+
+def stop_ledger_worker() -> None:
+    """Stop the worker and release the HTTP session on shutdown."""
+    if not MULTICHAIN_ENABLED:
+        return
+    _ledger_worker.stop()
+
+
+def get_chain_status() -> Dict[str, Any]:
+    """Cached MultiChain health, refreshed by the worker's heartbeat."""
+    snapshot = _ledger_worker.snapshot()
+    snapshot['enabled'] = MULTICHAIN_ENABLED
+    snapshot['stream'] = MULTICHAIN_STREAM_NAME
+    snapshot['rpcUrl'] = _client.url
+    return snapshot
+
+
+def write_to_multichain(threat_dict: dict) -> bool:
+    """
+    Queue threat metadata for publication to the permissioned MultiChain stream.
+
+    Returns immediately — the actual JSON-RPC `publish` happens on the worker
+    thread. This is deliberate: add_threat() runs inside the Socket.io event loop,
+    and a synchronous RPC there would stall blacklist broadcasts to every other
+    agent for the duration of the call (and for the full timeout if the node is
+    down), which is exactly when Tier 1 propagation matters most.
+    """
+    if not MULTICHAIN_ENABLED:
+        return False
+
+    return _ledger_worker.submit({
+        'timestamp': threat_dict['timestamp'],
+        'sourceMac': threat_dict['sourceMac'],
+        'attackType': threat_dict.get('attackType', 'Unknown'),
+        'tier': threat_dict.get('tier', 'Tier 3'),
+        'action': threat_dict.get('action', 'Blocked'),
+        'confidence': threat_dict.get('confidence', '99.9%'),
+    })
 
 
 # ─── Data Access Methods ───────────────────────────────────────────────────
@@ -303,8 +408,18 @@ def get_threats() -> List[Dict[str, Any]]:
 
 
 def get_ledger() -> List[Dict[str, Any]]:
+    """
+    Read the ledger mirror, newest first.
+
+    Served from SQLite rather than a live `liststreamitems` call so the dashboard's
+    polling never blocks on the chain; the worker keeps this table in step with the
+    stream on every sync interval.
+    """
     db = SessionLocal()
-    db_ledger = db.query(DBLedgerEntry).all()
+    db_ledger = db.query(DBLedgerEntry).order_by(
+        DBLedgerEntry.created_at.desc(),
+        DBLedgerEntry.timestamp.desc(),
+    ).all()
     results = [
         {
             'blockId': l.block_id,
@@ -356,22 +471,37 @@ def get_telemetry_summary() -> Dict[str, Any]:
     db = SessionLocal()
     count = db.query(DBThreat).count()
     agents = db.query(DBAgent).all()
-    ledger_entries = db.query(DBLedgerEntry).order_by(DBLedgerEntry.timestamp.desc()).all()
+    mirror_count = db.query(DBLedgerEntry).count()
+    newest = db.query(DBLedgerEntry).order_by(
+        DBLedgerEntry.created_at.desc(),
+        DBLedgerEntry.timestamp.desc(),
+    ).first()
     db.close()
-    
+
     avg_cpu = int(sum(a.cpu for a in agents) / len(agents)) if agents else 0
     avg_ram = int(sum(a.ram for a in agents) / len(agents)) if agents else 0
-    
-    block_height = len(ledger_entries)
-    last_sync = ledger_entries[0].timestamp if ledger_entries else "--:--:--"
-    
+
+    chain = get_chain_status()
+    chain_live = chain['enabled'] and chain['online'] and chain['streamReady']
+
+    # Real block height when we're talking to the node; fall back to the mirror's
+    # row count so the POC still shows something meaningful while DEGRADED.
+    block_height = chain['blockHeight'] if chain_live else mirror_count
+
+    if chain_live and chain['lastSyncAt']:
+        last_sync = datetime.fromtimestamp(chain['lastSyncAt']).strftime('%H:%M:%S')
+    elif newest:
+        last_sync = newest.timestamp
+    else:
+        last_sync = "--:--:--"
+
     return {
         'cpu': avg_cpu,
         'ram': avg_ram,
-        'latency': 5 if block_height > 0 else 0,
+        'latency': chain['latencyMs'] if chain_live else 0,
         'blockHeight': block_height,
         'lastSyncTime': last_sync,
-        'chainStatus': 'HEALTHY',
+        'chainStatus': 'HEALTHY' if chain_live else 'DEGRADED',
         'totalIncidents': count
     }
 

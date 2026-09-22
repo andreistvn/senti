@@ -9,11 +9,14 @@ Implements the contract endpoints for the admin dashboard:
 - GET /agents/:id — get single agent
 - GET /threats — list threat log entries
 - GET /ledger — list blockchain ledger entries
+- GET /ledger/status — MultiChain node health and publish counters
 - GET /policy — get current policy config
 - PUT /policy — update policy config
 - GET /telemetry/summary — get telemetry + blockchain metrics
 - GET /analytics/threat-volume — get threat volume history
 """
+
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Cookie
 from fastapi.middleware.cors import CORSMiddleware
@@ -24,7 +27,16 @@ import config
 import state
 import socketio
 
-app = FastAPI(title='SentiNet Admin Backend', version='1.0.0')
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Bring the MultiChain ledger worker up with the server and down with it."""
+    state.start_ledger_worker()
+    yield
+    state.stop_ledger_worker()
+
+
+app = FastAPI(title='SentiNet Admin Backend', version='1.0.0', lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -229,6 +241,23 @@ async def list_ledger(sentinet_admin_session: Optional[str] = Cookie(None)):
         raise HTTPException(status_code=401, detail='Session expired')
     
     return state.get_ledger()
+
+
+@app.get('/ledger/status')
+async def ledger_status(sentinet_admin_session: Optional[str] = Cookie(None)):
+    """
+    MultiChain node health: reachability, stream readiness, block height, RPC
+    latency, publish counters and the last error. Useful for diagnosing why the
+    dashboard is showing DEGRADED without tailing the server log.
+    """
+    if not sentinet_admin_session:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    digital_id = state.validate_session(sentinet_admin_session)
+    if not digital_id:
+        raise HTTPException(status_code=401, detail='Session expired')
+
+    return state.get_chain_status()
 
 
 # ─── Policy Endpoints ────────────────────────────────────────────────────────
