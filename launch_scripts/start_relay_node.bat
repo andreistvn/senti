@@ -28,23 +28,38 @@ echo.
 :: PATH if it isn't already on the system PATH, so nobody has to fiddle with
 :: environment variables or reopen their terminal.
 set "MC_HOME=%LOCALAPPDATA%\SentiNet\multichain"
-where multichaind >nul 2>&1
-if errorlevel 1 (
-    if exist "%MC_HOME%\multichaind.exe" (
-        set "PATH=%MC_HOME%;%PATH%"
-    )
-)
+if exist "%MC_HOME%\multichaind.exe" set "PATH=%MC_HOME%;%PATH%"
 
+:: A missing node is not fatal: detection, blocking and the Tier 3 blacklist
+:: broadcast all work without it - only the ledger is unavailable. This mirrors
+:: start_relay_node.sh. Set REQUIRE_CHAIN=1 to make it a hard error instead.
+set "CHAIN_AVAILABLE=1"
 where multichaind >nul 2>&1
-if errorlevel 1 (
-    echo ERROR: 'multichaind' not found.
-    echo.
-    echo        Run the one-time setup first:
-    echo            launch_scripts\setup_windows_relay.bat
-    echo.
-    echo        See WINDOWS_RELAY_SETUP.md for the full walkthrough.
+if not errorlevel 1 goto :chain_checked
+
+if "%REQUIRE_CHAIN%"=="1" (
+    echo ERROR: 'multichaind' not found and REQUIRE_CHAIN=1.
+    echo        Run launch_scripts\setup_windows_relay.bat first.
     pause
     exit /b 1
+)
+
+set "CHAIN_AVAILABLE=0"
+echo ======================================================================
+echo  WARNING: 'multichaind' not found - starting WITHOUT the ledger.
+echo ======================================================================
+echo   Tier 1/2 detection and the Tier 3 blacklist broadcast still work.
+echo   Chain Status will read DEGRADED and no ledger entries will appear.
+echo.
+echo   To enable the ledger:  launch_scripts\setup_windows_relay.bat
+echo   Details in WINDOWS_RELAY_SETUP.md
+echo.
+
+:chain_checked
+
+if "%CHAIN_AVAILABLE%"=="0" (
+    echo [1/4] Skipping MultiChain node ^(not installed^).
+    goto :skip_chain
 )
 
 if not exist "%CHAIN_DIR%\params.dat" (
@@ -90,20 +105,28 @@ if errorlevel 1 (
     echo       Node is already running.
 )
 
-:: --- 2. Generate admin-backend\.env --------------------------------------
-echo [2/4] Extracting RPC credentials from %CHAIN_DIR%...
+:skip_chain
 
-if not exist "%CHAIN_DIR%\multichain.conf" (
-    echo ERROR: %CHAIN_DIR%\multichain.conf not found - is the chain initialised?
-    pause
-    exit /b 1
+:: --- 2. Generate admin-backend\.env --------------------------------------
+set "MC_ENABLED=true"
+if "%CHAIN_AVAILABLE%"=="0" set "MC_ENABLED=false"
+
+if "%CHAIN_AVAILABLE%"=="0" (
+    echo [2/4] Writing admin-backend\.env with the ledger disabled...
+) else (
+    echo [2/4] Extracting RPC credentials from %CHAIN_DIR%...
+    if not exist "%CHAIN_DIR%\multichain.conf" (
+        echo ERROR: %CHAIN_DIR%\multichain.conf not found - is the chain initialised?
+        pause
+        exit /b 1
+    )
 )
 
 :: The .env generation lives in a real .ps1 file: embedding multi-line
 :: PowerShell in a .bat means fighting cmd.exe's pipe/quote escaping rules,
 :: which fail on the teammate's machine rather than here.
 del "%TEMP%\sentinet_lan_ip.txt" >nul 2>&1
-powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\launch_scripts\windows\Write-RelayEnv.ps1" -ChainDir "%CHAIN_DIR%" -RepoRoot "%ROOT%" -BindHost "%BIND_HOST%" -MultiChainEnabled "true" -LanIpOutFile "%TEMP%\sentinet_lan_ip.txt"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\launch_scripts\windows\Write-RelayEnv.ps1" -ChainDir "%CHAIN_DIR%" -RepoRoot "%ROOT%" -BindHost "%BIND_HOST%" -MultiChainEnabled "%MC_ENABLED%" -LanIpOutFile "%TEMP%\sentinet_lan_ip.txt"
 
 if errorlevel 1 (
     echo ERROR: failed to generate admin-backend\.env
@@ -116,20 +139,24 @@ if exist "%TEMP%\sentinet_lan_ip.txt" set /p LAN_IP=<"%TEMP%\sentinet_lan_ip.txt
 
 :: --- 3 & 4. Relay server + admin dashboard -------------------------------
 echo [3/4] Starting admin backend (relay)...
-start "SentiNet Admin Backend" cmd /k "cd /d "%ROOT%\admin-backend" && if exist venv\Scripts\activate (call venv\Scripts\activate) && python main.py"
+start "SentiNet Admin Backend" /D "%ROOT%\admin-backend" cmd /k "if exist venv\Scripts\activate.bat (call venv\Scripts\activate.bat) && python main.py"
 
 if "%SKIP_DASHBOARD%"=="1" (
     echo [4/4] Skipping admin dashboard (SKIP_DASHBOARD=1).
 ) else (
     echo [4/4] Starting admin dashboard...
-    start "SentiNet Admin Dashboard" cmd /k "cd /d "%ROOT%\admin-dashboard" && npm run dev"
+    start "SentiNet Admin Dashboard" /D "%ROOT%\admin-dashboard" cmd /k "npm run dev"
 )
 
 echo.
 echo RELAY NODE is up.
 echo    Admin API:        http://%LAN_IP%:8771  (bound on %BIND_HOST%)
 echo    Admin Dashboard:  http://localhost:5175
-echo    MultiChain:       %CHAIN_NAME%
+if "%CHAIN_AVAILABLE%"=="1" (
+    echo    MultiChain:       %CHAIN_NAME%
+) else (
+    echo    MultiChain:       *** DISABLED - no ledger, Chain Status = DEGRADED ***
+)
 echo.
 echo    Point agent machines at this relay with:
 echo      launch_scripts\start_agent_node.bat %LAN_IP%

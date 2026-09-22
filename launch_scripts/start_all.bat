@@ -9,6 +9,17 @@
 :: ===========================================================================
 setlocal
 
+:: The agent daemon needs raw-socket access for Scapy. Elevating once here means
+:: every window this script starts inherits admin rights, so start_agent_node.bat
+:: does not spawn a second, detached elevated process.
+net session >nul 2>&1
+if errorlevel 1 (
+    echo Requesting administrative privileges ^(needed by the agent daemon^)...
+    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    exit /b
+)
+
+:: Elevation resets the working directory to System32.
 cd /d "%~dp0.."
 set "ROOT=%CD%"
 
