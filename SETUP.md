@@ -60,19 +60,32 @@ cd ..
 
 ## Starting the System (Quick Start)
 
-Once dependencies are installed, the easiest way to boot everything up is using the automated bash script:
+Once dependencies are installed, the easiest way to boot everything up on a single
+machine is the all-in-one launcher:
 
 ```bash
-./start_all.sh
+./launch_scripts/start_all.sh
 ```
 *(Note: You will be prompted for your `sudo` password to allow the daemon to sniff network packets. It may take a minute for the Node servers to compile).*
+
+> This runs the relay node and one agent on the same machine — convenient for
+> development, but it does not exercise the decentralized architecture. To run the
+> three-machine demo (Relay Node + two Agents + Attacker), follow
+> [`POC_DEMO_GUIDE.md`](POC_DEMO_GUIDE.md), which uses
+> `launch_scripts/start_relay_node.sh` and `launch_scripts/start_agent_node.sh`.
+
+> **macOS note:** MultiChain ships no Mac binary (Windows/Linux x86-64 only), so on a
+> Mac the relay starts with the ledger disabled — it warns, sets
+> `MULTICHAIN_ENABLED=false`, and everything except the blockchain ledger works
+> normally. To get the ledger, host the relay on a Windows PC:
+> [`WINDOWS_RELAY_SETUP.md`](WINDOWS_RELAY_SETUP.md) is the full walkthrough.
 
 ## Quick Start (Windows)
 
 To start the entire system on Windows, open an **Administrator Command Prompt** and run the batch script:
 
 ```cmd
-start_all.bat
+launch_scripts\start_all.bat
 ```
 
 ---
@@ -165,16 +178,18 @@ python3 attack_generator.py poison --target <TARGET_IP> --gateway <GATEWAY_IP>
 
 If the system fails to start due to port conflicts (`Address already in use`), or if you need to shut down the system after using `start_all`, **do not just close the terminal windows.**
 
+The stop script also shuts the MultiChain node down (`multichain-cli sentinet stop`); pass `KEEP_CHAIN=1` to leave it running.
+
 **Mac / Linux:**
 Run the stop script to safely and forcefully kill all Python and Node processes related to the system:
 ```bash
-./stop_all.sh
+./launch_scripts/stop_all.sh
 ```
 
 **Windows:**
 Run the stop batch script from an Administrator Command Prompt:
 ```cmd
-stop_all.bat
+launch_scripts\stop_all.bat
 ```
 
 ### Python venv issues
