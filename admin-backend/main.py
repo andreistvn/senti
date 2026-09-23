@@ -334,6 +334,12 @@ async def health():
 # ─── Socket.io Events ────────────────────────────────────────────────────────
 
 sid_to_mac = {}
+# Which socket currently owns each MAC. An agent that loses its connection
+# reconnects with a *new* sid and re-registers; the old socket's disconnect can
+# arrive after that, and removing purely by MAC would then delete the agent that
+# had just come back — leaving it invisible on the dashboard while it believes
+# it is connected.
+mac_to_sid = {}
 
 @sio.event
 async def connect(sid, environ):
@@ -343,8 +349,17 @@ async def connect(sid, environ):
 async def disconnect(sid):
     print(f"[WebSocket] Client disconnected: {sid}")
     mac = sid_to_mac.pop(sid, None)
-    if mac:
-        state.remove_agent(mac)
+    if not mac:
+        return
+
+    if mac_to_sid.get(mac) != sid:
+        # A newer socket already owns this MAC — this is a stale disconnect for
+        # a connection that has since been replaced. Leave the agent in place.
+        print(f"[WebSocket] Stale disconnect for {mac}; a newer session is active.")
+        return
+
+    mac_to_sid.pop(mac, None)
+    state.remove_agent(mac)
 
 @sio.event
 async def register_agent(sid, data):
@@ -352,6 +367,7 @@ async def register_agent(sid, data):
     mac = data.get("mac")
     if mac:
         sid_to_mac[sid] = mac
+        mac_to_sid[mac] = sid
     state.upsert_agent(data)
 
 @sio.event
