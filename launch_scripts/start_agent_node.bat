@@ -65,30 +65,44 @@ if errorlevel 1 (
     echo       Relay is reachable.
 )
 
-if not exist "%ROOT%\tray-app\venv\Scripts\activate.bat" (
-    echo       WARNING: tray-app\venv not found. The daemon will fall back to
+set "TRAY_PY=python"
+if exist "%ROOT%\tray-app\venv\Scripts\python.exe" set "TRAY_PY=%ROOT%\tray-app\venv\Scripts\python.exe"
+if exist "%ROOT%\tray-app\.venv\Scripts\python.exe" set "TRAY_PY=%ROOT%\tray-app\.venv\Scripts\python.exe"
+if "%TRAY_PY%"=="python" (
+    echo       WARNING: tray-app venv not found. The daemon will fall back to
     echo       system Python and fail with "ModuleNotFoundError: scapy" unless
     echo       the dependencies are installed globally. See README.md.
 )
 
 echo [2/3] Starting agent daemon...
-:: SENTINET_RELAY_URL is already set above, so the new window inherits it.
-:: Setting it inside the cmd /k string would capture the space before "&&".
-:: start's /D sets the working directory, which avoids nesting quotes inside
-:: the quoted cmd /k argument (that breaks on paths containing a space).
-start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" cmd /k "if exist venv\Scripts\activate.bat (call venv\Scripts\activate.bat) && python sentinet_daemon.py"
+start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" cmd /k call "%TRAY_PY%" sentinet_daemon.py
 
 timeout /t 2 /nobreak >nul
 
+:: Don't claim success if elevation was declined or Scapy failed to bind -
+:: that failure is otherwise invisible until you wonder why no threats appear.
+powershell -NoProfile -Command "$found = (Get-CimInstance Win32_Process -Filter \"Name like 'python%%'\").Where({ $_.CommandLine -match 'sentinet_daemon\.py' }); if ($found) { exit 0 } else { exit 1 }" >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo ERROR: the agent daemon is not running.
+    echo        Check the "SentiNet Agent Daemon" window for the reason.
+    echo        Common causes: UAC/elevation declined, a missing dependency, or
+    echo        the loopback tray API port already in use.
+    echo        Without the daemon there is no packet capture - fix this before demoing.
+    pause
+    exit /b 1
+)
+echo       Daemon is running.
+
 if "%SKIP_TRAY%"=="1" (
-    echo       Skipping tray app (SKIP_TRAY=1) - the agent dashboard will have no data source.
+    echo       Skipping tray app ^(SKIP_TRAY=1^) - the agent dashboard will have no data source.
 ) else (
     echo       Starting tray app...
-    start "SentiNet Tray App" /D "%ROOT%\tray-app" cmd /k "if exist venv\Scripts\activate.bat (call venv\Scripts\activate.bat) && python sentinet_tray.py"
+    start "SentiNet Tray App" /D "%ROOT%\tray-app" cmd /k call "%TRAY_PY%" sentinet_tray.py
 )
 
 if "%SKIP_DASHBOARD%"=="1" (
-    echo [3/3] Skipping agent dashboard (SKIP_DASHBOARD=1).
+    echo [3/3] Skipping agent dashboard ^(SKIP_DASHBOARD=1^).
 ) else (
     echo [3/3] Starting agent dashboard...
     start "SentiNet Agent Dashboard" /D "%ROOT%\agent-dashboard" cmd /k "npm run dev"
