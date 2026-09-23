@@ -168,11 +168,15 @@ Write-Host "      Wrote $envFile"
 
 # --- Point the dashboard at this machine ----------------------------------
 
+# The dashboard calls its own origin; Vite proxies the API paths through to the
+# backend (see admin-dashboard/vite.config.ts). Pointing the browser straight at
+# the API on another host makes the request cross-site, so the SameSite=Lax
+# session cookie is dropped and login bounces back to the login screen.
 $dashDir = Join-Path $RepoRoot 'admin-dashboard'
 if (Test-Path $dashDir) {
     $dashEnv = Join-Path $dashDir '.env.local'
-    Set-Content -Path $dashEnv -Value "VITE_ADMIN_API_BASE_URL=http://${lan}:8771" -Encoding ASCII
-    Write-Host "      Dashboard API target: http://${lan}:8771"
+    Set-Content -Path $dashEnv -Value 'VITE_ADMIN_API_BASE_URL=' -Encoding ASCII
+    Write-Host '      Dashboard API: same-origin (proxied by Vite to 127.0.0.1:8771)'
 }
 
 # --- Hand the LAN IP back to the caller -----------------------------------
