@@ -31,7 +31,7 @@ import scapy.all as scapy
 from ml_engine import MLEngine
 from bayanihan_client import BayanihanClient
 
-from config import AGENT_VERSION, SIM_TICK_SECONDS
+from config import AGENT_VERSION, SIM_TICK_SECONDS, RELAY_URL
 from ipc_protocol import (
     IpcServer,
     MSG_BLACKLIST_UPDATE,
@@ -351,7 +351,7 @@ class SentiNetDaemon:
         self.state = DaemonState()
         self.ml_engine = MLEngine()
         self.bayanihan_client = BayanihanClient(
-            relay_url="http://localhost:8771",
+            relay_url=RELAY_URL,
             on_blacklist_update=self.state.add_to_blacklist,
             agent_info=agent_info
         )

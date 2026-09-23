@@ -5,7 +5,7 @@ echo 🚽 Flushing SentiNet Database (Windows)
 echo ===========================================
 
 echo 1. Stopping all active SentiNet services...
-call stop_all.bat
+call launch_scripts\stop_all.bat
 
 echo 2. Deleting persistent SQLite database...
 if exist "admin-backend\sentinet.db" (
@@ -17,5 +17,5 @@ if exist "admin-backend\sentinet.db" (
 
 echo.
 echo ✅ Database flushed! Your MAC address has been cleared.
-echo You can now run start_all.bat to boot up with a clean slate.
+echo You can now run launch_scripts\start_all.bat to boot up with a clean slate.
 pause

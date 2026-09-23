@@ -20,7 +20,8 @@ The SentiNet system is a distributed Intrusion Detection and Prevention System (
 *   **Role:** The centralized aggregator (Tier-3) that receives threat intelligence from all connected agents, logs them into an SQLite database, and broadcasts updates back to the network.
 *   **Key Files:**
     *   `main.py`: FastAPI server serving HTTP endpoints (for the dashboard) and Socket.io WebSockets (for the agents).
-    *   `state.py`: Manages the SQLite database (`sentinet.db`) via SQLAlchemy and handles the (currently mocked) MultiChain integration.
+    *   `state.py`: Manages the SQLite database (`sentinet.db`) via SQLAlchemy and bridges threat events onto the MultiChain ledger.
+    *   `multichain.py`: JSON-RPC client for the MultiChain node plus the background worker that publishes threats, retries them while the node is down, and resyncs the local ledger mirror with the chain.
 
 ### 3. The Dashboards (`agent-dashboard/` & `admin-dashboard/`)
 *   **Role:** Next.js / React frontends for visualizing the system state.
@@ -33,10 +34,10 @@ The SentiNet system is a distributed Intrusion Detection and Prevention System (
 
 This system is currently a **Proof-of-Concept (POC)**. Several complex distributed features are structurally present in the code but are functionally mocked. **Do not attempt to debug these as if they are fully functional distributed systems.**
 
-### 1. The MultiChain Blockchain is NOT Real
-*   **The Code:** In `admin-backend/state.py`, the `write_to_multichain()` function attempts to make a JSON-RPC call to a local MultiChain node. 
-*   **The Reality:** There is no MultiChain node running. The function is designed to catch the `requests.exceptions.ConnectionError`, log a warning, and silently skip writing to the blockchain. 
-*   **Impact:** The system gracefully falls back to just logging the threat in the local SQLite database (`DBLedgerEntry`). The blockchain ledger shown in the Admin Dashboard is simply reading from this SQLite table, using a truncated UUID/TxID snippet as the `blockId`. 
+### 1. The MultiChain Blockchain Needs a Running Node
+*   **The Code:** `admin-backend/multichain.py` is a real JSON-RPC client. On startup it runs `getinfo`, creates and subscribes to the `threat_logs` stream if the node doesn't have it, then `publish`es one item per threat (source MAC as the stream key).
+*   **The Reality:** The integration is live, but it needs an actual `multichaind` node — see `admin-backend/README.md` for the two commands that create one. Without a node the relay reports `chainStatus: DEGRADED`, queues threat records in memory (up to `MULTICHAIN_QUEUE_SIZE`), and republishes them when the node comes back. Detection and blacklist broadcast are unaffected.
+*   **Impact:** The ledger table in the Admin Dashboard reads from SQLite `ledger_entries`, but that table is now a *mirror* of the chain: rows are written only after MultiChain confirms a transaction (`blockId` is the real txid prefix), and the worker re-reads the stream every `MULTICHAIN_SYNC_INTERVAL` seconds so items published by peer relay nodes appear too. Check `GET /ledger/status` to see node health, block height and publish counters.
 
 ### 2. Network Traffic Sniffing is Limited to ARP
 *   **The Code:** In `tray-app/sentinet_daemon.py`, the `CaptureEngine` uses `scapy.sniff(filter="arp", ...)`
@@ -56,18 +57,31 @@ This system is currently a **Proof-of-Concept (POC)**. Several complex distribut
 
 ### Starting the System
 
+All launchers live in [`launch_scripts/`](launch_scripts/). Which one you want depends
+on whether you are demonstrating the distributed architecture or just developing:
+
+| Script | Starts | Use when |
+|---|---|---|
+| `start_relay_node.sh` / `.bat` | MultiChain node, `admin-backend`, Admin Dashboard | Machine 1 of the POC demo |
+| `start_agent_node.sh <RELAY_IP>` / `.bat` | Capture daemon, tray app, Agent Dashboard | Machines 2 & 3 of the POC demo |
+| `start_all.sh` / `.bat` | Both of the above, on one machine | Local development |
+
 **Mac / Linux:**
-To start the entire system (Backend, Daemon, and Dashboards) simultaneously, run:
+To start everything on a single machine, run:
 ```bash
-./start_all.sh
+./launch_scripts/start_all.sh
 ```
 *(Note: You will be prompted for your `sudo` password to allow the daemon to sniff network packets).*
 
 **Windows:**
-To start the entire system on Windows, run the provided batch file from an Administrator Command Prompt:
+Run the batch file from an Administrator Command Prompt:
 ```cmd
-start_all.bat
+launch_scripts\start_all.bat
 ```
+
+> For the three-machine demonstration (Relay Node, two Agents, Attacker), follow
+> [`POC_DEMO_GUIDE.md`](POC_DEMO_GUIDE.md). `start_all` runs a single agent, so no peer
+> exists to receive a `blacklist_update` — it cannot show the collaborative defense.
 
 ### Stopping the System & Troubleshooting
 
@@ -76,12 +90,12 @@ If you need to shut down the system, or if it fails to start due to port conflic
 **Mac / Linux:**
 Use the provided stop script to safely and forcefully kill all associated processes:
 ```bash
-./stop_all.sh
+./launch_scripts/stop_all.sh
 ```
-*(If you are completely stuck, the script internally uses `sudo pkill -9 -f sentinet_daemon.py` to ensure the ports are freed).*
+*(If you are completely stuck, the script internally uses `sudo pkill -f sentinet_daemon.py` to ensure the ports are freed. It also stops the MultiChain node — pass `KEEP_CHAIN=1` to leave it running.)*
 
 **Windows:**
 Use the provided stop batch file from an Administrator Command Prompt:
 ```cmd
-stop_all.bat
+launch_scripts\stop_all.bat
 ```

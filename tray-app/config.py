@@ -14,6 +14,10 @@ API_PORT = int(os.environ.get("SENTINET_API_PORT", "8770"))
 # dev server (Vite defaults to 5173). Change if you serve it elsewhere.
 DASHBOARD_URL = os.environ.get("SENTINET_DASHBOARD_URL", "http://localhost:5173")
 
+# Bayanihan (Tier 3) relay node the daemon reports threats to. On a multi-machine
+# testbed this must point at the relay machine's LAN address, not loopback.
+RELAY_URL = os.environ.get("SENTINET_RELAY_URL", "http://localhost:8771")
+
 # Cosmetic.
 AGENT_VERSION = "v2.4.9"
 
