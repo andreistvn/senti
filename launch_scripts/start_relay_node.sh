@@ -230,15 +230,15 @@ PY
 chmod 600 "$ENV_FILE"
 echo "      Wrote $ENV_FILE (contains the RPC password — it is gitignored)"
 
-# The dashboard is a browser app: its API calls resolve in the *viewer's* browser,
-# not on this host. If it stays pointed at localhost, opening the dashboard from
-# another machine (e.g. the Mac hosting this VM) makes the browser call its own
-# localhost:8771 and everything 404s. Point it at this machine's LAN address.
+# The dashboard calls its own origin and Vite proxies /agents, /auth, /ledger
+# etc. through to this backend (see admin-dashboard/vite.config.ts). Pointing the
+# browser straight at the API on another host would make the request cross-site,
+# and the SameSite=Lax session cookie would be dropped - which looks like a login
+# that succeeds and then bounces straight back to the login screen.
 DASH_ENV="$ROOT/admin-dashboard/.env.local"
-DASH_API_URL="${DASH_API_URL:-http://$LAN_IP:8771}"
 if [ -d "$ROOT/admin-dashboard" ]; then
-    printf 'VITE_ADMIN_API_BASE_URL=%s\n' "$DASH_API_URL" > "$DASH_ENV"
-    echo "      Dashboard API target: $DASH_API_URL"
+    printf 'VITE_ADMIN_API_BASE_URL=\n' > "$DASH_ENV"
+    echo "      Dashboard API: same-origin (proxied by Vite to 127.0.0.1:8771)"
 fi
 
 # ─── 3 & 4. Relay server + admin dashboard ──────────────────────────────────
