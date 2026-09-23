@@ -25,4 +25,5 @@ analysis_results.md
 
 # Generated runtime config (contains MultiChain RPC credentials)
 .env
+.env.bak
 !.env.example

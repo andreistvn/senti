@@ -44,9 +44,15 @@ if "%KEEP_CHAIN%"=="1" (
     goto :done
 )
 
+set "MC_HOME=%LOCALAPPDATA%\SentiNet\multichain"
 where multichain-cli >nul 2>&1
 if errorlevel 1 (
-    echo   multichain-cli not on PATH - skipping chain shutdown.
+    if exist "%MC_HOME%\multichain-cli.exe" set "PATH=%MC_HOME%;%PATH%"
+)
+
+where multichain-cli >nul 2>&1
+if errorlevel 1 (
+    echo   multichain-cli not found - skipping chain shutdown.
     goto :done
 )
 
