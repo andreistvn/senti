@@ -15,18 +15,7 @@ setlocal EnableDelayedExpansion
 net session >nul 2>&1
 if not errorlevel 1 (
     echo Administrative permissions confirmed.
-<<<<<<< HEAD
-) else (
-    echo Requesting administrative privileges for Scapy...
-    if "%~1"=="" (
-        powershell -Command "Start-Process '%~dpnx0' -Verb RunAs"
-    ) else (
-        powershell -Command "Start-Process '%~dpnx0' -ArgumentList '%1' -Verb RunAs"
-    )
-    exit /b
-=======
     goto :have_admin
->>>>>>> origin/main
 )
 
 echo Requesting administrative privileges for Scapy...
@@ -76,27 +65,17 @@ if errorlevel 1 (
     echo       Relay is reachable.
 )
 
-<<<<<<< HEAD
 set "TRAY_PY=python"
 if exist "%ROOT%\tray-app\venv\Scripts\python.exe" set "TRAY_PY=%ROOT%\tray-app\venv\Scripts\python.exe"
 if exist "%ROOT%\tray-app\.venv\Scripts\python.exe" set "TRAY_PY=%ROOT%\tray-app\.venv\Scripts\python.exe"
-
-echo [2/3] Starting agent daemon...
-start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" cmd /k call "%TRAY_PY%" sentinet_daemon.py
-=======
-if not exist "%ROOT%\tray-app\venv\Scripts\activate.bat" (
-    echo       WARNING: tray-app\venv not found. The daemon will fall back to
+if "%TRAY_PY%"=="python" (
+    echo       WARNING: tray-app venv not found. The daemon will fall back to
     echo       system Python and fail with "ModuleNotFoundError: scapy" unless
     echo       the dependencies are installed globally. See README.md.
 )
 
 echo [2/3] Starting agent daemon...
-:: SENTINET_RELAY_URL is already set above, so the new window inherits it.
-:: Setting it inside the cmd /k string would capture the space before "&&".
-:: start's /D sets the working directory, which avoids nesting quotes inside
-:: the quoted cmd /k argument (that breaks on paths containing a space).
-start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" cmd /k "if exist venv\Scripts\activate.bat (call venv\Scripts\activate.bat) && python sentinet_daemon.py"
->>>>>>> origin/main
+start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" cmd /k call "%TRAY_PY%" sentinet_daemon.py
 
 timeout /t 2 /nobreak >nul
 
@@ -119,11 +98,7 @@ if "%SKIP_TRAY%"=="1" (
     echo       Skipping tray app ^(SKIP_TRAY=1^) - the agent dashboard will have no data source.
 ) else (
     echo       Starting tray app...
-<<<<<<< HEAD
     start "SentiNet Tray App" /D "%ROOT%\tray-app" cmd /k call "%TRAY_PY%" sentinet_tray.py
-=======
-    start "SentiNet Tray App" /D "%ROOT%\tray-app" cmd /k "if exist venv\Scripts\activate.bat (call venv\Scripts\activate.bat) && python sentinet_tray.py"
->>>>>>> origin/main
 )
 
 if "%SKIP_DASHBOARD%"=="1" (
