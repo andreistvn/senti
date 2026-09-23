@@ -84,14 +84,14 @@ if errorlevel 1 (
 echo       Daemon is running.
 
 if "%SKIP_TRAY%"=="1" (
-    echo       Skipping tray app (SKIP_TRAY=1) - the agent dashboard will have no data source.
+    echo       Skipping tray app ^(SKIP_TRAY=1^) - the agent dashboard will have no data source.
 ) else (
     echo       Starting tray app...
     start "SentiNet Tray App" /D "%ROOT%\tray-app" cmd /k call "%TRAY_PY%" sentinet_tray.py
 )
 
 if "%SKIP_DASHBOARD%"=="1" (
-    echo [3/3] Skipping agent dashboard (SKIP_DASHBOARD=1).
+    echo [3/3] Skipping agent dashboard ^(SKIP_DASHBOARD=1^).
 ) else (
     echo [3/3] Starting agent dashboard...
     start "SentiNet Agent Dashboard" /D "%ROOT%\agent-dashboard" cmd /k "npm run dev"

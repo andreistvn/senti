@@ -165,7 +165,7 @@ if exist "%ROOT%\admin-backend\.venv\Scripts\python.exe" set "PY_RUN=%ROOT%\admi
 start "SentiNet Admin Backend" /D "%ROOT%\admin-backend" cmd /k call "%PY_RUN%" main.py
 
 if "%SKIP_DASHBOARD%"=="1" (
-    echo [4/4] Skipping admin dashboard (SKIP_DASHBOARD=1).
+    echo [4/4] Skipping admin dashboard ^(SKIP_DASHBOARD=1^).
 ) else (
     echo [4/4] Starting admin dashboard...
     start "SentiNet Admin Dashboard" /D "%ROOT%\admin-dashboard" cmd /k "npm run dev"
