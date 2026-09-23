@@ -82,6 +82,14 @@ Every time you want the relay running. It:
 4. Starts the relay API on port 8771, reachable from other machines.
 5. Starts the Admin Dashboard on port 5175.
 
+If `multichaind` isn't on `PATH` yet — Step 2 hasn't been run, or the antivirus
+exclusion is still pending — the script no longer aborts. It prints a warning, writes
+`MULTICHAIN_ENABLED=false` to `admin-backend\.env`, and starts everything else anyway:
+detection, blocking and the blacklist broadcast all still work, only the ledger is
+unavailable and **Chain Status** reads `DEGRADED`. Run `launch_scripts\setup_windows_relay.bat`
+to get the real chain, or set `REQUIRE_CHAIN=1` before running this script to make a
+missing node a hard error instead of a warning.
+
 You'll end up with several windows open. **Leave them all running.** The one titled
 *SentiNet MultiChain Node* is the blockchain — if something goes wrong, its output is
 where to look.
@@ -159,7 +167,7 @@ delete `%APPDATA%\MultiChain\sentinet`; the next start rebuilds it.
 
 | Symptom | Fix |
 |---|---|
-| `'multichaind' not found` | Run `launch_scripts\setup_windows_relay.bat` first. |
+| `'multichaind' not found` | The relay still starts, just without the ledger (`Chain Status` reads `DEGRADED`). Run `launch_scripts\setup_windows_relay.bat` to install MultiChain and get the real chain. Set `REQUIRE_CHAIN=1` before starting the relay to make this a hard error instead. |
 | Setup says `multichaind.exe would not run` | Antivirus quarantined it. Add an exclusion for `%LOCALAPPDATA%\SentiNet\multichain`, then re-run setup. |
 | `'python' is not recognized` | Python isn't on PATH. Reinstall from [python.org](https://www.python.org/downloads/) with **"Add python.exe to PATH"** ticked. |
 | MultiChain node window opens then closes instantly | Read it before it vanishes: run `multichaind sentinet` directly in a Command Prompt to see the error. Usually antivirus or a port conflict. |
