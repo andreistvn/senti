@@ -48,6 +48,34 @@ else
     echo "      Continuing anyway — the agent will keep retrying the connection."
 fi
 
+# ─── Pre-flight: dependencies ───────────────────────────────────────────────
+# On a fresh clone these are missing, and without them the tray and dashboard
+# die instantly. Catch it here rather than letting them fail into a log file
+# nobody reads while the script cheerfully reports success.
+MISSING=""
+
+if [ ! -f "$ROOT/tray-app/venv/bin/activate" ]; then
+    MISSING="$MISSING
+  tray-app/venv is missing. Create it:
+      cd tray-app && python3 -m venv venv && source venv/bin/activate \\
+        && pip install -r requirements.txt"
+fi
+
+if [ "${SKIP_DASHBOARD:-0}" != "1" ] && [ ! -d "$ROOT/agent-dashboard/node_modules" ]; then
+    MISSING="$MISSING
+  agent-dashboard/node_modules is missing. Install it:
+      cd agent-dashboard && npm install"
+fi
+
+if [ -n "$MISSING" ]; then
+    echo ""
+    echo "ERROR: this machine is missing first-time setup.$MISSING"
+    echo ""
+    echo "Run those from the repository root, then start the agent again."
+    echo "See README.md for the full first-time install."
+    exit 1
+fi
+
 start_service() {
     local name=$1 dir=$2 cmd=$3
     local log_file="/tmp/sentinet_${name}.log"
@@ -59,6 +87,31 @@ start_service() {
         eval "$cmd" > "$log_file" 2>&1 &
         echo $! > "/tmp/sentinet_${name}.pid"
     )
+}
+
+# Confirm a backgrounded service is still alive; report its log if it isn't.
+# Without this a dead tray or dashboard is invisible until you go looking for
+# a tray icon that never appeared.
+verify_service() {
+    local name=$1 label=$2
+    local pid_file="/tmp/sentinet_${name}.pid"
+    local log_file="/tmp/sentinet_${name}.log"
+    local pid=""
+
+    [ -f "$pid_file" ] && pid="$(cat "$pid_file" 2>/dev/null)"
+
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        echo "      $label is running."
+        return 0
+    fi
+
+    echo ""
+    echo "ERROR: $label exited immediately. Last lines of $log_file:"
+    echo "---"
+    tail -n 15 "$log_file" 2>/dev/null || echo "(no log written)"
+    echo "---"
+    FAILED=1
+    return 1
 }
 
 # ─── 1. Privileged capture daemon ───────────────────────────────────────────
@@ -105,7 +158,27 @@ else
     echo "[3/3] Skipping agent dashboard (SKIP_DASHBOARD=1)."
 fi
 
-sleep 3
+sleep 4
+
+FAILED="${FAILED:-0}"
+[ "${SKIP_TRAY:-0}" != "1" ]      && verify_service "tray_app"        "Tray app"
+[ "${SKIP_DASHBOARD:-0}" != "1" ] && verify_service "agent_dashboard" "Agent dashboard"
+
+if [ "$FAILED" = "1" ]; then
+    echo ""
+    echo "The capture daemon is running, but the components above are not."
+    echo ""
+    echo "Without the tray app you cannot toggle protection ON, and an agent only"
+    echo "registers with the relay once protection is enabled — so this machine will"
+    echo "never appear on the admin dashboard until this is fixed."
+    echo ""
+    echo "On a VM or over SSH the usual cause is that the tray needs a desktop"
+    echo "session: pystray cannot create a tray icon with no DISPLAY. Run the"
+    echo "script from the VM's own desktop rather than an SSH session."
+    echo ""
+    echo "Stop what did start with: ./launch_scripts/stop_all.sh"
+    exit 1
+fi
 
 echo ""
 echo "AGENT NODE is up."
