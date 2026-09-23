@@ -107,10 +107,15 @@ machines.
 
 ```bat
 curl http://localhost:8771/health
-multichain-cli sentinet getinfo
+"%LOCALAPPDATA%\SentiNet\multichain\multichain-cli.exe" sentinet getinfo
 ```
 
 Expect `{"status":"ok"}` and then the chain's name and block height.
+
+> `multichain-cli` isn't on your system `PATH` — MultiChain is installed into a
+> private folder, not a machine-wide location. The full path above works from any
+> Command Prompt. (The window running `start_relay_node.bat` itself has it on `PATH`
+> for that session, so the bare command also works there.)
 
 Then open <http://localhost:5175>, log in with digital ID **`ADM-7734-ALPHA`**, and
 confirm the **Chain Status** tile reads **HEALTHY**.
@@ -165,7 +170,8 @@ delete `%APPDATA%\MultiChain\sentinet`; the next start rebuilds it.
 | MultiChain node window opens then closes instantly | Read it before it vanishes: run `multichaind sentinet` directly in a Command Prompt to see the error. Usually antivirus or a port conflict. |
 | Agents can't connect | Confirm you gave them the **LAN IP**, not `localhost`. Check both machines are on the same network, and that the firewall rules exist: `netsh advfirewall firewall show rule name="SentiNet Relay API 8771"` |
 | Dashboard loads but everything is empty | `admin-dashboard\.env.local` has the wrong address. Re-run `start_relay_node.bat` — it rewrites it with the current LAN IP. |
-| `Chain Status: DEGRADED` | `multichain-cli sentinet getinfo` to see if the node is alive; `curl http://localhost:8771/ledger/status` for the exact error. Threat reports queue in memory and publish automatically once the chain returns — nothing is lost. |
+| `Chain Status: DEGRADED` | `"%LOCALAPPDATA%\SentiNet\multichain\multichain-cli.exe" sentinet getinfo` to see if the node is alive; `curl http://localhost:8771/ledger/status` for the exact error. Threat reports queue in memory and publish automatically once the chain returns — nothing is lost. |
+| `'multichain-cli' is not recognized` | It's not on `PATH` — that's expected in a fresh Command Prompt. Use the full path shown above, or run the check from the window `start_relay_node.bat` is running in. |
 | LAN IP changed (new Wi-Fi, reboot) | Re-run `start_relay_node.bat` and send teammates the new IP. A static IP or DHCP reservation avoids this. |
 
 ---
