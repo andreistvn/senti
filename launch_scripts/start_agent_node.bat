@@ -17,7 +17,11 @@ if not errorlevel 1 (
     echo Administrative permissions confirmed.
 ) else (
     echo Requesting administrative privileges for Scapy...
-    powershell -Command "Start-Process '%~dpnx0' -ArgumentList '%1' -Verb RunAs"
+    if "%~1"=="" (
+        powershell -Command "Start-Process '%~dpnx0' -Verb RunAs"
+    ) else (
+        powershell -Command "Start-Process '%~dpnx0' -ArgumentList '%1' -Verb RunAs"
+    )
     exit /b
 )
 
@@ -55,23 +59,42 @@ if errorlevel 1 (
     echo       Relay is reachable.
 )
 
+set "TRAY_PY=python"
+if exist "%ROOT%\tray-app\venv\Scripts\python.exe" set "TRAY_PY=%ROOT%\tray-app\venv\Scripts\python.exe"
+if exist "%ROOT%\tray-app\.venv\Scripts\python.exe" set "TRAY_PY=%ROOT%\tray-app\.venv\Scripts\python.exe"
+
 echo [2/3] Starting agent daemon...
-start "SentiNet Agent Daemon" cmd /k "cd /d "%ROOT%\tray-app" && set SENTINET_RELAY_URL=!RELAY_URL! && if exist venv\Scripts\activate (call venv\Scripts\activate) && python sentinet_daemon.py"
+start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" cmd /k "set SENTINET_RELAY_URL=!RELAY_URL! & "%TRAY_PY%" sentinet_daemon.py"
 
 timeout /t 2 /nobreak >nul
+
+:: Don't claim success if elevation was declined or Scapy failed to bind -
+:: that failure is otherwise invisible until you wonder why no threats appear.
+powershell -NoProfile -Command "$found = (Get-CimInstance Win32_Process -Filter \"Name like 'python%%'\").Where({ $_.CommandLine -match 'sentinet_daemon\.py' }); if ($found) { exit 0 } else { exit 1 }" >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo ERROR: the agent daemon is not running.
+    echo        Check the "SentiNet Agent Daemon" window for the reason.
+    echo        Common causes: UAC/elevation declined, a missing dependency, or
+    echo        the loopback tray API port already in use.
+    echo        Without the daemon there is no packet capture - fix this before demoing.
+    pause
+    exit /b 1
+)
+echo       Daemon is running.
 
 if "%SKIP_TRAY%"=="1" (
     echo       Skipping tray app (SKIP_TRAY=1) - the agent dashboard will have no data source.
 ) else (
     echo       Starting tray app...
-    start "SentiNet Tray App" cmd /k "cd /d "%ROOT%\tray-app" && if exist venv\Scripts\activate (call venv\Scripts\activate) && python sentinet_tray.py"
+    start "SentiNet Tray App" /D "%ROOT%\tray-app" cmd /k ""%TRAY_PY%" sentinet_tray.py"
 )
 
 if "%SKIP_DASHBOARD%"=="1" (
     echo [3/3] Skipping agent dashboard (SKIP_DASHBOARD=1).
 ) else (
     echo [3/3] Starting agent dashboard...
-    start "SentiNet Agent Dashboard" cmd /k "cd /d "%ROOT%\agent-dashboard" && npm run dev"
+    start "SentiNet Agent Dashboard" /D "%ROOT%\agent-dashboard" cmd /k "npm run dev"
 )
 
 echo.
