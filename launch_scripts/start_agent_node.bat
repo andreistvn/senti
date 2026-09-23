@@ -64,7 +64,7 @@ if exist "%ROOT%\tray-app\venv\Scripts\python.exe" set "TRAY_PY=%ROOT%\tray-app\
 if exist "%ROOT%\tray-app\.venv\Scripts\python.exe" set "TRAY_PY=%ROOT%\tray-app\.venv\Scripts\python.exe"
 
 echo [2/3] Starting agent daemon...
-start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" cmd /k "set SENTINET_RELAY_URL=!RELAY_URL! & "%TRAY_PY%" sentinet_daemon.py"
+start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" cmd /k call "%TRAY_PY%" sentinet_daemon.py
 
 timeout /t 2 /nobreak >nul
 
@@ -87,7 +87,7 @@ if "%SKIP_TRAY%"=="1" (
     echo       Skipping tray app (SKIP_TRAY=1) - the agent dashboard will have no data source.
 ) else (
     echo       Starting tray app...
-    start "SentiNet Tray App" /D "%ROOT%\tray-app" cmd /k ""%TRAY_PY%" sentinet_tray.py"
+    start "SentiNet Tray App" /D "%ROOT%\tray-app" cmd /k call "%TRAY_PY%" sentinet_tray.py
 )
 
 if "%SKIP_DASHBOARD%"=="1" (

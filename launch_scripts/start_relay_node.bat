@@ -75,52 +75,56 @@ if errorlevel 1 (
     echo.
 )
 
-if "%CHAIN_AVAILABLE%"=="1" (
-    if not exist "%CHAIN_DIR%\params.dat" (
-        echo [1/4] Chain '%CHAIN_NAME%' not found - creating it...
-        multichain-util create %CHAIN_NAME%
-        if errorlevel 1 (
-            echo ERROR: multichain-util create failed.
-            pause
-            exit /b 1
-        )
-    ) else (
-        echo [1/4] Chain '%CHAIN_NAME%' already exists.
-    )
+if "%CHAIN_AVAILABLE%"=="0" goto :chain_skip
 
-    multichain-cli %CHAIN_NAME% getinfo >nul 2>&1
+if not exist "%CHAIN_DIR%\params.dat" (
+    echo [1/4] Chain '%CHAIN_NAME%' not found - creating it...
+    multichain-util create %CHAIN_NAME%
     if errorlevel 1 (
-        :: NOTE: MultiChain's own Windows README states "The multichaind -daemon flag
-        :: does not work, so open another cmd prompt." So we launch it in its own
-        :: window instead of daemonising. The window stays open (cmd /k) so that if
-        :: the node dies you can actually read why.
-        echo       Starting multichaind in its own window...
-        start "SentiNet MultiChain Node" cmd /k "multichaind %CHAIN_NAME%"
-
-        echo       Waiting for RPC to accept connections...
-        set "CHAIN_UP="
-        for /l %%i in (1,1,30) do (
-            if not defined CHAIN_UP (
-                timeout /t 1 /nobreak >nul
-                multichain-cli %CHAIN_NAME% getinfo >nul 2>&1
-                if not errorlevel 1 set "CHAIN_UP=1"
-            )
-        )
-        if not defined CHAIN_UP (
-            echo ERROR: MultiChain node did not come up.
-            echo        Check the "SentiNet MultiChain Node" window for the reason.
-            echo        Antivirus/firewall blocking multichaind.exe is a common cause
-            echo        on Windows - MultiChain's own README warns about this.
-            pause
-            exit /b 1
-        )
-        echo       Node is up.
-    ) else (
-        echo       Node is already running.
+        echo ERROR: multichain-util create failed.
+        pause
+        exit /b 1
     )
 ) else (
-    echo [1/4] Skipping MultiChain node ^(not installed^).
+    echo [1/4] Chain '%CHAIN_NAME%' already exists.
 )
+
+multichain-cli %CHAIN_NAME% getinfo >nul 2>&1
+if errorlevel 1 (
+    :: NOTE: MultiChain's own Windows README states "The multichaind -daemon flag
+    :: does not work, so open another cmd prompt." So we launch it in its own
+    :: window instead of daemonising. The window stays open (cmd /k) so that if
+    :: the node dies you can actually read why.
+    echo       Starting multichaind in its own window...
+    start "SentiNet MultiChain Node" cmd /k "multichaind %CHAIN_NAME%"
+
+    echo       Waiting for RPC to accept connections...
+    set "CHAIN_UP="
+    for /l %%i in (1,1,30) do (
+        if not defined CHAIN_UP (
+            timeout /t 1 /nobreak >nul
+            multichain-cli %CHAIN_NAME% getinfo >nul 2>&1
+            if not errorlevel 1 set "CHAIN_UP=1"
+        )
+    )
+    if not defined CHAIN_UP (
+        echo ERROR: MultiChain node did not come up.
+        echo        Check the "SentiNet MultiChain Node" window for the reason.
+        echo        Antivirus/firewall blocking multichaind.exe is a common cause
+        echo        on Windows - MultiChain's own README warns about this.
+        pause
+        exit /b 1
+    )
+    echo       Node is up.
+) else (
+    echo       Node is already running.
+)
+goto :chain_done
+
+:chain_skip
+echo [1/4] Skipping MultiChain node ^(not installed^).
+
+:chain_done
 
 :: --- 2. Generate admin-backend\.env --------------------------------------
 if "%CHAIN_AVAILABLE%"=="1" (
@@ -158,7 +162,7 @@ set "PY_RUN=python"
 if exist "%ROOT%\admin-backend\venv\Scripts\python.exe" set "PY_RUN=%ROOT%\admin-backend\venv\Scripts\python.exe"
 if exist "%ROOT%\admin-backend\.venv\Scripts\python.exe" set "PY_RUN=%ROOT%\admin-backend\.venv\Scripts\python.exe"
 
-start "SentiNet Admin Backend" /D "%ROOT%\admin-backend" cmd /k ""%PY_RUN%" main.py"
+start "SentiNet Admin Backend" /D "%ROOT%\admin-backend" cmd /k call "%PY_RUN%" main.py
 
 if "%SKIP_DASHBOARD%"=="1" (
     echo [4/4] Skipping admin dashboard (SKIP_DASHBOARD=1).
