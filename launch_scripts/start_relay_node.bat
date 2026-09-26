@@ -142,7 +142,7 @@ echo [3/4] Starting admin backend (relay)...
 start "SentiNet Admin Backend" /D "%ROOT%\admin-backend" cmd /k "if exist venv\Scripts\activate.bat (call venv\Scripts\activate.bat) && python main.py"
 
 if "%SKIP_DASHBOARD%"=="1" (
-    echo [4/4] Skipping admin dashboard (SKIP_DASHBOARD=1).
+    echo [4/4] Skipping admin dashboard ^(SKIP_DASHBOARD=1^).
 ) else (
     echo [4/4] Starting admin dashboard...
     start "SentiNet Admin Dashboard" /D "%ROOT%\admin-dashboard" cmd /k "npm run dev"
