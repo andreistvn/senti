@@ -11,6 +11,26 @@
 :: ===========================================================================
 setlocal EnableDelayedExpansion
 
+:: There is deliberately no loopback default: assuming localhost makes an agent
+:: try to connect to itself, which is refused and leaves it missing from the
+:: dashboard with nothing obviously wrong. Checked before elevating so the error
+:: appears in this window instead of one that closes.
+if "%~1"=="" if "%SENTINET_RELAY_URL%"=="" (
+    echo.
+    echo ERROR: no relay address given.
+    echo.
+    echo   Usage: launch_scripts\start_agent_node.bat ^<RELAY-IP^>
+    echo          launch_scripts\start_agent_node.bat 192.168.1.4
+    echo.
+    echo   The relay's start script prints the exact command to use.
+    echo.
+    echo   Running everything on one machine for development? Use:
+    echo       launch_scripts\start_all.bat
+    echo.
+    pause
+    exit /b 1
+)
+
 :: Scapy needs raw sockets - re-launch elevated if we aren't already.
 net session >nul 2>&1
 if not errorlevel 1 (
@@ -35,10 +55,9 @@ exit /b
 cd /d "%~dp0.."
 set "ROOT=%CD%"
 
-:: Relay location: env var > argument > loopback.
-if not "%SENTINET_RELAY_URL%"=="" (
-    set "RELAY_URL=%SENTINET_RELAY_URL%"
-) else if not "%~1"=="" (
+:: Relay location: the argument wins, then SENTINET_RELAY_URL. A leftover value
+:: in the environment used to silently override an explicitly passed address.
+if not "%~1"=="" (
     echo %~1 | findstr /b "http" >nul
     if errorlevel 1 (
         set "RELAY_URL=http://%~1:8771"
@@ -46,7 +65,7 @@ if not "%SENTINET_RELAY_URL%"=="" (
         set "RELAY_URL=%~1"
     )
 ) else (
-    set "RELAY_URL=http://localhost:8771"
+    set "RELAY_URL=%SENTINET_RELAY_URL%"
 )
 set "SENTINET_RELAY_URL=!RELAY_URL!"
 
