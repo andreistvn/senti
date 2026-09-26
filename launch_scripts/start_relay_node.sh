@@ -271,6 +271,21 @@ sleep 3
 echo ""
 echo "RELAY NODE is up."
 echo "   Admin API:        http://$LAN_IP:8771  (bound on $BIND_HOST)"
+
+# A machine has one address per interface, and DHCP leases move. Print every
+# candidate so a wrong or stale pick is visible here rather than discovered
+# later as "the agents never showed up".
+OTHER_IPS="$(
+    if command -v ipconfig >/dev/null 2>&1; then
+        for i in $(ifconfig -l 2>/dev/null); do ipconfig getifaddr "$i" 2>/dev/null; done
+    else
+        ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}'
+    fi | grep -v "^${LAN_IP}$" | tr '\n' ' '
+)"
+if [ -n "${OTHER_IPS// /}" ]; then
+    echo "   Other addresses:  $OTHER_IPS"
+    echo "                     (agents must use an address on THEIR subnet)"
+fi
 echo "   Admin Dashboard:  http://localhost:5175"
 if [ "$CHAIN_AVAILABLE" = "1" ]; then
     echo "   MultiChain:       $CHAIN_NAME @ 127.0.0.1:$RPC_PORT"
