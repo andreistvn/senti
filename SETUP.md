@@ -25,6 +25,7 @@ Before you can run the system, you must install the dependencies for each compon
 In case of incompatible commands due to OS differences, just look up the equivalent commands for your operating system.
 
 ### 1. Admin Backend
+
 ```bash
 cd admin-backend
 python3 -m venv venv
@@ -34,6 +35,7 @@ cd ..
 ```
 
 ### 2. Admin Dashboard
+
 ```bash
 cd admin-dashboard
 npm install
@@ -41,6 +43,7 @@ cd ..
 ```
 
 ### 3. Agent Dashboard
+
 ```bash
 cd agent-dashboard
 npm install
@@ -48,6 +51,7 @@ cd ..
 ```
 
 ### 4. Tray Daemon
+
 ```bash
 cd tray-app
 python3 -m venv venv
@@ -55,6 +59,36 @@ source venv/bin/activate
 pip install -r requirements.txt
 cd ..
 ```
+
+Windows SETUP
+
+### 1. Admin Backend
+
+cd admin-backend
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+cd ..
+
+### 2. Admin Dashboard
+
+cd admin-dashboard
+npm install
+cd ..
+
+### 3. Agent Dashboard
+
+cd agent-dashboard
+npm install
+cd ..
+
+### 4. Tray Daemon
+
+cd tray-app
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+cd ..
 
 ---
 
@@ -66,7 +100,8 @@ machine is the all-in-one launcher:
 ```bash
 ./launch_scripts/start_all.sh
 ```
-*(Note: You will be prompted for your `sudo` password to allow the daemon to sniff network packets. It may take a minute for the Node servers to compile).*
+
+_(Note: You will be prompted for your `sudo` password to allow the daemon to sniff network packets. It may take a minute for the Node servers to compile)._
 
 > This runs the relay node and one agent on the same machine — convenient for
 > development, but it does not exercise the decentralized architecture. To run the
@@ -112,7 +147,7 @@ npm run dev
 ```
 
 Open `http://localhost:5175` in your browser.
-*(Note: Configuration like the Backend URL is pre-configured in `.env.local`, which is deliberately tracked in version control for this POC).*
+_(Note: Configuration like the Backend URL is pre-configured in `.env.local`, which is deliberately tracked in version control for this POC)._
 
 ### Terminal 3: Agent Dashboard
 
@@ -151,12 +186,12 @@ python3 attack_generator.py poison --target <TARGET_IP> --gateway <GATEWAY_IP>
 
 ## Service URLs
 
-| Service | URL | Purpose |
-|---------|-----|---------|
-| Admin Dashboard | http://localhost:5175 | Web UI for system administration |
-| Agent Dashboard | http://localhost:5173 | Web UI for agent protection status |
-| Admin Backend | http://127.0.0.1:8771 | API for admin dashboard (localhost only) |
-| Tray Daemon | http://127.0.0.1:8770 | API for agent dashboard (localhost only) |
+| Service         | URL                   | Purpose                                  |
+| --------------- | --------------------- | ---------------------------------------- |
+| Admin Dashboard | http://localhost:5175 | Web UI for system administration         |
+| Agent Dashboard | http://localhost:5173 | Web UI for agent protection status       |
+| Admin Backend   | http://127.0.0.1:8771 | API for admin dashboard (localhost only) |
+| Tray Daemon     | http://127.0.0.1:8770 | API for agent dashboard (localhost only) |
 
 ## Credentials
 
@@ -168,9 +203,9 @@ python3 attack_generator.py poison --target <TARGET_IP> --gateway <GATEWAY_IP>
 
 **Agent Dashboard:**
 
-- Digital ID: *(Any value)*
-- Password: *(Any value)*
-- *(The agent dashboard currently accepts any mock credentials during this POC phase).*
+- Digital ID: _(Any value)_
+- Password: _(Any value)_
+- _(The agent dashboard currently accepts any mock credentials during this POC phase)._
 
 ## Troubleshooting
 
@@ -182,12 +217,14 @@ The stop script also shuts the MultiChain node down (`multichain-cli sentinet st
 
 **Mac / Linux:**
 Run the stop script to safely and forcefully kill all Python and Node processes related to the system:
+
 ```bash
 ./launch_scripts/stop_all.sh
 ```
 
 **Windows:**
 Run the stop batch script from an Administrator Command Prompt:
+
 ```cmd
 launch_scripts\stop_all.bat
 ```
