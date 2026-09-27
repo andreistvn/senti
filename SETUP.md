@@ -209,12 +209,6 @@ python3 attack_generator.py poison --target <TARGET_IP> --gateway <GATEWAY_IP>
 - Password: `SentiNet@2049`
 - MFA Code: `482910`
 
-**Agent Dashboard:**
-
-- Digital ID: _(Any value)_
-- Password: _(Any value)_
-- _(The agent dashboard currently accepts any mock credentials during this POC phase)._
-
 ## Troubleshooting
 
 ### Clean Shutdown / Zombie Processes
