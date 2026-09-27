@@ -1,13 +1,13 @@
 import React from 'react';
 import {
   Shield, Radio, Clock, Activity, Database,
-  TrendingUp, Users, RefreshCw, Cpu, Server, Award, LogOut
+  TrendingUp, Users, RefreshCw, Cpu, Server, Award
 } from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
 import { Power } from 'lucide-react';
 import { useDashboardState } from '../dashboard/useDashboardState';
 
-export default function Dashboard({ onLogout }: { onLogout: () => void }) {
+export default function Dashboard() {
   const {
     activeTab,
     setActiveTab,
@@ -75,15 +75,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               <Icon className="w-3.5 h-3.5" /> {label}
             </button>
           ))}
-        </div>
-
-        <div className="flex">
-          <button 
-            onClick={onLogout} 
-            className="flex items-center gap-2 px-6 py-3 text-[10px] tracking-widest text-[#c0392b] hover:bg-red-50 border-l border-[#cccccc] uppercase transition"
-          >
-            <LogOut className="w-4 h-4" /> Logout
-          </button>
         </div>
       </div>
 
