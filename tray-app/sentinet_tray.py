@@ -17,6 +17,7 @@ This process is **unprivileged**. It does not touch raw sockets or perform any
 packet capture. All security-critical state comes from the root-privileged
 daemon (``sentinet_daemon.py``) via IPC.
 """
+import sys
 import webbrowser
 
 import pystray
@@ -104,6 +105,34 @@ def build(state: AgentState):
     return icon
 
 
+def _install_windows_close_handler(icon):
+    """Make ``stop_all.bat`` / a closed console window remove the notify icon.
+
+    A force-killed process (``taskkill /F``, or any other TerminateProcess)
+    never runs Python cleanup code, so pystray never sends the Shell_NotifyIcon
+    NIM_DELETE that removes the icon - it lingers as a "ghost" until Explorer
+    happens to redraw the tray. Handling CTRL_CLOSE/LOGOFF/SHUTDOWN lets a
+    *graceful* close call icon.stop() first, so the icon disappears immediately.
+    Windows-only; keeps a reference to the ctypes callback alive to prevent GC.
+    """
+    import ctypes
+
+    CTRL_CLOSE_EVENT = 2
+    CTRL_LOGOFF_EVENT = 5
+    CTRL_SHUTDOWN_EVENT = 6
+    HANDLER_ROUTINE = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)
+
+    def handler(ctrl_type):
+        if ctrl_type in (CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT):
+            icon.stop()
+            return 1
+        return 0
+
+    callback = HANDLER_ROUTINE(handler)
+    ctypes.windll.kernel32.SetConsoleCtrlHandler(callback, True)
+    return callback
+
+
 def main():
     state = AgentState()
 
@@ -120,6 +149,7 @@ def main():
     print("[SentiNet Tray] Tray icon is running. Right-click it for the menu.")
 
     icon = build(state)
+    _keepalive = _install_windows_close_handler(icon) if sys.platform == "win32" else None
     try:
         icon.run()  # blocks on the main thread until Quit
     finally:

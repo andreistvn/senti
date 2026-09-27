@@ -27,5 +27,6 @@ analysis_results.md
 .env
 .env.bak
 !.env.example
+admin-dashboard/.env.local
 Chapter-1-3_Sentinet-FINAL-REVISED-COPY (1).pdf
 admin-backend/.env.bak
