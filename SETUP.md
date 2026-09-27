@@ -60,7 +60,7 @@ pip install -r requirements.txt
 cd ..
 ```
 
-Windows SETUP
+**Windows**
 
 ### 1. Admin Backend
 
