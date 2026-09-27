@@ -23,7 +23,14 @@ echo   Closing service windows...
 taskkill /FI "WINDOWTITLE eq SentiNet Admin Backend*"   /F /T >nul 2>&1
 taskkill /FI "WINDOWTITLE eq SentiNet Admin Dashboard*" /F /T >nul 2>&1
 taskkill /FI "WINDOWTITLE eq SentiNet Agent Daemon*"    /F /T >nul 2>&1
+
+:: Tray app first gets a non-forceful close so its CTRL_CLOSE handler can run
+:: and remove the notification-area icon (a force-killed process never gets
+:: to call Shell_NotifyIcon NIM_DELETE, leaving a "ghost" icon behind).
+taskkill /FI "WINDOWTITLE eq SentiNet Tray App*"        /T >nul 2>&1
+timeout /t 2 /nobreak >nul
 taskkill /FI "WINDOWTITLE eq SentiNet Tray App*"        /F /T >nul 2>&1
+
 taskkill /FI "WINDOWTITLE eq SentiNet Agent Dashboard*" /F /T >nul 2>&1
 
 :: Window titles from the pre-reorganisation scripts, for good measure.
