@@ -1,7 +1,7 @@
 import os
 import time
 import threading
-import numpy as np
+import pandas as pd
 import joblib
 from collections import defaultdict
 
@@ -9,6 +9,20 @@ from collections import defaultdict
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'ml_models', 'sentinet_rf_model.joblib')
 ENCODER_PATH = os.path.join(BASE_DIR, 'ml_models', 'sentinet_label_encoder.joblib')
+
+# Must match FEATURE_COLUMNS in model-training/train_sentinet.py, in order -
+# the model was fit on a DataFrame with these column names, and predict_proba
+# warns if X lacks them.
+FEATURE_COLUMNS = [
+    "arp_request_rate",
+    "arp_reply_rate",
+    "req_to_reply_ratio",
+    "unique_ip_per_mac",
+    "iat_mean",
+    "iat_variance",
+    "packet_burstiness",
+    "gratuitous_arp_count",
+]
 
 class MLEngine:
     """
@@ -61,9 +75,10 @@ class MLEngine:
             
         # 5. Execute Inference (outside the history lock if possible, but fine here since model.predict is fast)
         try:
-            # Reshape into (1, 8) 2D array
-            X = np.array(features).reshape(1, -1)
-            
+            # A DataFrame with the training-time column names avoids sklearn's
+            # "X does not have valid feature names" warning on every prediction.
+            X = pd.DataFrame([features], columns=FEATURE_COLUMNS)
+
             # predict_proba returns an array of shape (n_samples, n_classes)
             # Typically class 0 is benign, class 1 is malicious
             probs = self.model.predict_proba(X)[0]
