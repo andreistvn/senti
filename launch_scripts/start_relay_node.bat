@@ -7,6 +7,12 @@
 :: 3. Starts the FastAPI relay + admin dashboard in separate windows
 ::
 :: Usage:  launch_scripts\start_relay_node.bat
+::
+:: Environment overrides:
+::   CHAIN_NAME=sentinet     MultiChain chain name
+::   BIND_HOST=0.0.0.0       Relay bind address (0.0.0.0 so remote agents can reach it)
+::   SKIP_DASHBOARD=1        Start the API only, no Vite dev server
+::   REQUIRE_CHAIN=1         Fail instead of degrading when multichaind is missing
 :: ===========================================================================
 setlocal EnableDelayedExpansion
 
@@ -16,7 +22,13 @@ set "ROOT=%CD%"
 
 if "%CHAIN_NAME%"=="" set "CHAIN_NAME=sentinet"
 if "%BIND_HOST%"=="" set "BIND_HOST=0.0.0.0"
+if "%REQUIRE_CHAIN%"=="" set "REQUIRE_CHAIN=0"
 set "CHAIN_DIR=%APPDATA%\MultiChain\%CHAIN_NAME%"
+
+:: The relay is useful without a chain: detection, blacklist broadcast and both
+:: dashboards work, only the ledger is unavailable. So a missing node degrades
+:: instead of aborting - set REQUIRE_CHAIN=1 (demo day) to make it fatal.
+set "CHAIN_AVAILABLE=1"
 
 echo.
 echo SentiNet - Starting RELAY NODE
@@ -35,32 +47,34 @@ if exist "%MC_HOME%\multichaind.exe" set "PATH=%MC_HOME%;%PATH%"
 :: start_relay_node.sh. Set REQUIRE_CHAIN=1 to make it a hard error instead.
 set "CHAIN_AVAILABLE=1"
 where multichaind >nul 2>&1
-if not errorlevel 1 goto :chain_checked
-
-if "%REQUIRE_CHAIN%"=="1" (
-    echo ERROR: 'multichaind' not found and REQUIRE_CHAIN=1.
-    echo        Run launch_scripts\setup_windows_relay.bat first.
-    pause
-    exit /b 1
+if errorlevel 1 (
+    if "%REQUIRE_CHAIN%"=="1" (
+        echo ERROR: 'multichaind' not found and REQUIRE_CHAIN=1.
+        echo.
+        echo        Run the one-time setup first:
+        echo            launch_scripts\setup_windows_relay.bat
+        echo.
+        echo        See WINDOWS_RELAY_SETUP.md for the full walkthrough.
+        pause
+        exit /b 1
+    )
+    set "CHAIN_AVAILABLE=0"
+    echo ----------------------------------------------------------------------
+    echo   WARNING: 'multichaind' not found - starting WITHOUT the ledger.
+    echo ----------------------------------------------------------------------
+    echo   Tier 1/2 detection and the Tier 3 blacklist broadcast still work.
+    echo   Chain Status will read DEGRADED and no ledger entries will appear.
+    echo.
+    echo   Run the one-time setup to enable the ledger:
+    echo       launch_scripts\setup_windows_relay.bat
+    echo   See WINDOWS_RELAY_SETUP.md for the full walkthrough.
+    echo.
+    echo   Use REQUIRE_CHAIN=1 to make a missing node a hard error instead.
+    echo ----------------------------------------------------------------------
+    echo.
 )
 
-set "CHAIN_AVAILABLE=0"
-echo ======================================================================
-echo  WARNING: 'multichaind' not found - starting WITHOUT the ledger.
-echo ======================================================================
-echo   Tier 1/2 detection and the Tier 3 blacklist broadcast still work.
-echo   Chain Status will read DEGRADED and no ledger entries will appear.
-echo.
-echo   To enable the ledger:  launch_scripts\setup_windows_relay.bat
-echo   Details in WINDOWS_RELAY_SETUP.md
-echo.
-
-:chain_checked
-
-if "%CHAIN_AVAILABLE%"=="0" (
-    echo [1/4] Skipping MultiChain node ^(not installed^).
-    goto :skip_chain
-)
+if "%CHAIN_AVAILABLE%"=="0" goto :chain_skip
 
 if not exist "%CHAIN_DIR%\params.dat" (
     echo [1/4] Chain '%CHAIN_NAME%' not found - creating it...
@@ -104,22 +118,26 @@ if errorlevel 1 (
 ) else (
     echo       Node is already running.
 )
+goto :chain_done
 
-:skip_chain
+:chain_skip
+echo [1/4] Skipping MultiChain node ^(not installed^).
+
+:chain_done
 
 :: --- 2. Generate admin-backend\.env --------------------------------------
-set "MC_ENABLED=true"
-if "%CHAIN_AVAILABLE%"=="0" set "MC_ENABLED=false"
-
-if "%CHAIN_AVAILABLE%"=="0" (
-    echo [2/4] Writing admin-backend\.env with the ledger disabled...
-) else (
+if "%CHAIN_AVAILABLE%"=="1" (
     echo [2/4] Extracting RPC credentials from %CHAIN_DIR%...
+
     if not exist "%CHAIN_DIR%\multichain.conf" (
         echo ERROR: %CHAIN_DIR%\multichain.conf not found - is the chain initialised?
         pause
         exit /b 1
     )
+    set "MC_ENABLED=true"
+) else (
+    echo [2/4] Writing admin-backend\.env with the ledger disabled...
+    set "MC_ENABLED=false"
 )
 
 :: The .env generation lives in a real .ps1 file: embedding multi-line
@@ -139,7 +157,11 @@ if exist "%TEMP%\sentinet_lan_ip.txt" set /p LAN_IP=<"%TEMP%\sentinet_lan_ip.txt
 
 :: --- 3 & 4. Relay server + admin dashboard -------------------------------
 echo [3/4] Starting admin backend (relay)...
-start "SentiNet Admin Backend" /D "%ROOT%\admin-backend" cmd /k "if exist venv\Scripts\activate.bat (call venv\Scripts\activate.bat) && python main.py"
+set "PY_RUN=python"
+if exist "%ROOT%\admin-backend\venv\Scripts\python.exe" set "PY_RUN=%ROOT%\admin-backend\venv\Scripts\python.exe"
+if exist "%ROOT%\admin-backend\.venv\Scripts\python.exe" set "PY_RUN=%ROOT%\admin-backend\.venv\Scripts\python.exe"
+
+start "SentiNet Admin Backend" /D "%ROOT%\admin-backend" cmd /k call "%PY_RUN%" main.py
 
 if "%SKIP_DASHBOARD%"=="1" (
     echo [4/4] Skipping admin dashboard ^(SKIP_DASHBOARD=1^).

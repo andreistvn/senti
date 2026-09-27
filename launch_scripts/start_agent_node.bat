@@ -86,10 +86,15 @@ if errorlevel 1 (
 
 :: Pre-flight. On a fresh clone these are missing and the tray and dashboard die
 :: instantly, while the script used to report success anyway.
+:: Both venv and .venv are accepted - older setup instructions used .venv.
+set "TRAY_PY="
+if exist "%ROOT%\tray-app\venv\Scripts\python.exe"  set "TRAY_PY=%ROOT%\tray-app\venv\Scripts\python.exe"
+if exist "%ROOT%\tray-app\.venv\Scripts\python.exe" set "TRAY_PY=%ROOT%\tray-app\.venv\Scripts\python.exe"
+
 set "MISSING=0"
-if not exist "%ROOT%\tray-app\venv\Scripts\python.exe" (
+if not defined TRAY_PY (
     echo.
-    echo ERROR: tray-app\venv is missing. Create it:
+    echo ERROR: no tray-app virtualenv found ^(looked for venv and .venv^). Create one:
     echo     cd tray-app
     echo     python -m venv venv
     echo     venv\Scripts\activate
@@ -114,12 +119,13 @@ if "%MISSING%"=="1" (
 
 echo [2/3] Starting agent daemon...
 :: SENTINET_RELAY_URL is already set above, so the new window inherits it.
-:: Setting it inside the cmd /k string would capture the space before "&&".
-:: start's /D sets the working directory, which avoids nesting quotes inside
-:: the quoted cmd /k argument (that breaks on paths containing a space).
+:: Tee-Object writes output to both the window and a log file - cmd /k alone
+:: leaves nothing on disk, and the checks below plus doctor_agent.bat read it.
+:: start's /D sets the working directory, avoiding quotes nested inside the
+:: quoted command, which breaks on paths containing a space.
 set "DAEMON_LOG=%TEMP%\sentinet_daemon.log"
 del "%DAEMON_LOG%" >nul 2>&1
-start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%ROOT%\tray-app\venv\Scripts\python.exe' sentinet_daemon.py 2>&1 | Tee-Object -FilePath '%DAEMON_LOG%'"
+start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%TRAY_PY%' sentinet_daemon.py 2>&1 | Tee-Object -FilePath '%DAEMON_LOG%'"
 
 timeout /t 2 /nobreak >nul
 
@@ -127,7 +133,7 @@ if "%SKIP_TRAY%"=="1" (
     echo       Skipping tray app ^(SKIP_TRAY=1^) - the agent dashboard will have no data source.
 ) else (
     echo       Starting tray app...
-    start "SentiNet Tray App" /D "%ROOT%\tray-app" powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%ROOT%\tray-app\venv\Scripts\python.exe' sentinet_tray.py 2>&1 | Tee-Object -FilePath '%TEMP%\sentinet_tray_app.log'"
+    start "SentiNet Tray App" /D "%ROOT%\tray-app" powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%TRAY_PY%' sentinet_tray.py 2>&1 | Tee-Object -FilePath '%TEMP%\sentinet_tray_app.log'"
 )
 
 if "%SKIP_DASHBOARD%"=="1" (

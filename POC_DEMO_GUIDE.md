@@ -147,7 +147,10 @@ launch_scripts\start_agent_node.bat 192.168.10.10
 This starts the privileged Scapy daemon (it will prompt for `sudo` — Tier 1 needs raw
 socket access), the tray app, and the Agent Dashboard on port 5173. The script pings
 the relay's `/health` first and warns you if it's unreachable, rather than failing
-silently later.
+silently later. It also verifies the daemon actually came up before moving on — if
+elevation was declined or Scapy couldn't bind, it stops with an error instead of
+silently starting a dashboard with no data behind it. Check `/tmp/sentinet_daemon.log`
+(macOS/Linux) or the **SentiNet Agent Daemon** window (Windows) for the real reason.
 
 **Then click the tray icon and toggle protection ON.** The daemon doesn't capture
 until you do. The agent reports itself to the relay on connect.
@@ -264,8 +267,8 @@ Mac — see the box in *Before you start*), so Chain Status will read `DEGRADED`
 | Agents don't appear on the Admin Dashboard | Wrong relay IP, port 8771 firewalled, or protection not toggled ON in the tray. Check `/tmp/sentinet_daemon.log`. |
 | Traffic counters frozen at 0 | The daemon only sniffs ARP. A quiet network produces nothing — run the traffic generators. |
 | Agent B never receives the blacklist update | Both agents must be connected to the *same* relay. Confirm both are listed in the Admin Dashboard before attacking. |
-| `multichaind: command not found` on **Linux/Windows** | MultiChain isn't on `PATH` — see the install snippet above. |
-| `multichaind: command not found` on **macOS** | Expected: there is no macOS build. The script now warns and starts without the ledger instead of aborting. For a real ledger, host the relay on Linux/Windows. Set `REQUIRE_CHAIN=1` to make this a hard error instead of a warning. |
+| `multichaind: command not found` (any relay platform) | MultiChain isn't installed or isn't on `PATH`. The relay script no longer aborts on this — it warns, writes `MULTICHAIN_ENABLED=false`, and starts everything else without the ledger (`Chain Status` reads `DEGRADED`). Install it: Windows — `launch_scripts\setup_windows_relay.bat`; Linux — the install snippet above. macOS has no build at all — host the relay on Windows or Linux instead. Set `REQUIRE_CHAIN=1` to make a missing node a hard error instead. |
+| Agent script exits with `the agent daemon is not running` | Elevation/`sudo` was declined, or Scapy failed to bind a raw socket. Check `/tmp/sentinet_daemon.log` (macOS/Linux) or the **SentiNet Agent Daemon** window (Windows) for the real error. |
 | Relay started but Ledger tab is empty and Chain Status is `DEGRADED` | Either no chain node (see above) or `MULTICHAIN_ENABLED=false` in `admin-backend/.env`. Check the relay's console for the `[MultiChain]` line printed at startup. |
 | Attack generator sees no target | Attacker and agents must be on the same Layer-2 subnet; ARP does not route. |
 | `.env` has stale credentials | Re-run `start_relay_node.sh`; it regenerates `.env` from the live chain config each time (old one saved as `.env.bak`). |
