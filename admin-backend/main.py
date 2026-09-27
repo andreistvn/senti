@@ -341,9 +341,26 @@ sid_to_mac = {}
 # it is connected.
 mac_to_sid = {}
 
+def _peer_address(environ) -> str:
+    """
+    Best-effort remote address for a socket.io client.
+
+    Logged so the relay's own console answers the question "did that machine
+    reach me at all?" — which separates a network problem from an application
+    one without having to go and read logs on the agent.
+    """
+    try:
+        client = environ.get('asgi.scope', {}).get('client')
+        if client:
+            return f"{client[0]}:{client[1]}"
+    except Exception:
+        pass
+    return environ.get('REMOTE_ADDR') or 'unknown'
+
+
 @sio.event
 async def connect(sid, environ):
-    print(f"[WebSocket] Client connected: {sid}")
+    print(f"[WebSocket] Client connected: {sid} from {_peer_address(environ)}")
 
 @sio.event
 async def disconnect(sid):

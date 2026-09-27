@@ -20,16 +20,41 @@ set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Relay location: explicit env var > positional arg > loopback.
-if [ -n "${SENTINET_RELAY_URL:-}" ]; then
-    RELAY_URL="$SENTINET_RELAY_URL"
-elif [ $# -ge 1 ]; then
+# Relay location: the positional argument wins, then SENTINET_RELAY_URL.
+#
+# There is deliberately NO loopback default. It used to fall back to
+# http://localhost:8771, which is only ever correct on the relay machine
+# itself — on an agent it means "connect to myself", the connection is refused,
+# and the agent never appears on the dashboard. Requiring the address makes that
+# mistake impossible instead of quiet.
+#
+# The argument is checked first so that passing an address always wins: a
+# leftover SENTINET_RELAY_URL in the shell used to silently override it.
+if [ $# -ge 1 ] && [ -n "$1" ]; then
     case "$1" in
         http://*|https://*) RELAY_URL="$1" ;;
         *)                  RELAY_URL="http://$1:8771" ;;
     esac
+    if [ -n "${SENTINET_RELAY_URL:-}" ] && [ "$SENTINET_RELAY_URL" != "$RELAY_URL" ]; then
+        echo "Note: ignoring SENTINET_RELAY_URL=$SENTINET_RELAY_URL in favour of the argument."
+    fi
+elif [ -n "${SENTINET_RELAY_URL:-}" ]; then
+    RELAY_URL="$SENTINET_RELAY_URL"
 else
-    RELAY_URL="http://localhost:8771"
+    echo ""
+    echo "ERROR: no relay address given."
+    echo ""
+    echo "  Usage: ./launch_scripts/start_agent_node.sh <RELAY-IP>"
+    echo "         ./launch_scripts/start_agent_node.sh 192.168.1.4"
+    echo ""
+    echo "  The relay's start script prints the exact command to use. There is no"
+    echo "  default on purpose: assuming localhost makes an agent try to connect to"
+    echo "  itself, which fails quietly and leaves it missing from the dashboard."
+    echo ""
+    echo "  Running everything on one machine for development? Use:"
+    echo "      ./launch_scripts/start_all.sh"
+    echo ""
+    exit 1
 fi
 export SENTINET_RELAY_URL="$RELAY_URL"
 
@@ -142,6 +167,24 @@ if ! pgrep -f "sentinet_daemon.py" >/dev/null 2>&1; then
     exit 1
 fi
 echo "      Daemon is running."
+
+# Confirm the daemon actually received the relay address. It runs under sudo,
+# which resets the environment, so a passthrough failure here would otherwise
+# only show up as "the agent never appears on the dashboard".
+DAEMON_TARGET="$(grep -a 'Relay target:' /tmp/sentinet_daemon.log 2>/dev/null | tail -n1 | sed 's/.*Relay target: //')"
+if [ -n "$DAEMON_TARGET" ] && [ "$DAEMON_TARGET" != "$RELAY_URL" ]; then
+    echo ""
+    echo "ERROR: the daemon is using the wrong relay address."
+    echo "         started with : $RELAY_URL"
+    echo "         daemon using : $DAEMON_TARGET"
+    echo ""
+    echo "The address did not survive being passed through sudo. The agent would"
+    echo "never reach the relay. Stop with ./launch_scripts/stop_all.sh and report"
+    echo "this — it is a bug in this script, not in your setup."
+    exit 1
+elif [ -n "$DAEMON_TARGET" ]; then
+    echo "      Daemon is targeting $DAEMON_TARGET"
+fi
 
 # ─── 2. Tray app (serves the dashboard's loopback API) ──────────────────────
 if [ "${SKIP_TRAY:-0}" != "1" ]; then
