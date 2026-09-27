@@ -64,31 +64,39 @@ Windows SETUP
 
 ### 1. Admin Backend
 
+```bash
 cd admin-backend
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
 cd ..
+```
 
 ### 2. Admin Dashboard
 
+```bash
 cd admin-dashboard
 npm install
 cd ..
+```
 
 ### 3. Agent Dashboard
 
+```bash
 cd agent-dashboard
 npm install
 cd ..
+```
 
 ### 4. Tray Daemon
 
+```bash
 cd tray-app
 python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
 cd ..
+```
 
 ---
 
