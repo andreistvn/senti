@@ -358,9 +358,18 @@ def measure_relay() -> Dict[str, float]:
     administrator would see in Task Manager or top.
     """
     mem = psutil.virtual_memory()
+
+    # In-use is total - available, NOT mem.used. psutil's `percent` is defined as
+    # (total - available) / total, while `used` excludes cached and inactive
+    # pages — on macOS the two differ enormously (6.0 GB vs 12.4 GB on a 16 GB
+    # machine). Reporting `used` next to a bar driven by `percent` made the
+    # number and the bar disagree, and made the relay tile contradict the agent
+    # dashboard's gauge, which was already using `percent`.
+    in_use = mem.total - mem.available
+
     return {
         'cpu_percent': round(psutil.cpu_percent(None), 2),
-        'ram_mb': round(mem.used / (1024 * 1024), 2),
+        'ram_mb': round(in_use / (1024 * 1024), 2),
         'ram_percent': round(mem.percent, 2),
         'ram_total_mb': round(mem.total / (1024 * 1024), 2),
     }
