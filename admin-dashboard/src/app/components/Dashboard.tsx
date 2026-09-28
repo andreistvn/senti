@@ -241,8 +241,14 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           <span className="text-white tracking-widest text-sm font-bold uppercase">Admin Sentinet</span>
         </div>
         <div className="flex items-center gap-6 text-xs text-[#8899bb]">
-          <span className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-sm bg-[#00aa55]" />MultiChain: Active</span>
-          <span className="flex items-center gap-2"><div className="w-2.5 h-2.5 rounded-sm bg-[#00aa55]" />WebSocket: Listening</span>
+          <span className="flex items-center gap-2">
+            <div className={`w-2.5 h-2.5 rounded-sm ${blockchainMetrics.chainStatus === 'HEALTHY' ? 'bg-[#00aa55]' : 'bg-[#c0392b]'}`} />
+            MultiChain: {blockchainMetrics.chainStatus === 'HEALTHY' ? 'Active' : 'Degraded'}
+          </span>
+          <span className="flex items-center gap-2">
+            <div className={`w-2.5 h-2.5 rounded-sm ${blockchainMetrics.connectedAgents > 0 ? 'bg-[#00aa55]' : 'bg-[#94a3b8]'}`} />
+            Agents Connected: {blockchainMetrics.connectedAgents}
+          </span>
           <span className="flex items-center gap-2"><Activity className="w-4 h-4" />Sync Latency: {telemetry.latency}ms</span>
         </div>
       </header>
@@ -438,7 +444,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                   </div>
                 </div>
                 <div className="flex-1 flex flex-col gap-2">
-                  <div className="flex justify-between text-sm font-bold uppercase"><span>Relay Node RAM</span><span className="font-['JetBrains_Mono',_monospace]">{telemetry.ramMb.toFixed(1)} MB</span></div>
+                  <div className="flex justify-between text-sm font-bold uppercase"><span>Relay Node RAM</span><span className="font-['JetBrains_Mono',_monospace]">{(telemetry.ramMb / 1024).toFixed(1)} / {(telemetry.ramTotalMb / 1024).toFixed(1)} GB</span></div>
                   <div className="w-full h-8 border border-[#e2e8f0] p-1 bg-white">
                     <div className="h-full bg-[#1a73e8] transition-all duration-500" style={{ width: `${telemetry.ram}%` }} />
                   </div>

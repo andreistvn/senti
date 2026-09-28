@@ -54,7 +54,6 @@ class AgentState:
 
         # Bayanihan
         self.sig_contributions: int = 0
-        self.users_protected: int = 40
 
         # Detection log
         self.events: list = []
@@ -126,7 +125,6 @@ class AgentState:
             self.memory = stats.get("memory", self.memory)
             self.memory_mb = stats.get("memoryMb", self.memory_mb)
             self.sig_contributions = bayanihan.get("contributions", self.sig_contributions)
-            self.users_protected = bayanihan.get("usersProtected", self.users_protected)
             self.last_threat = stats.get("lastThreat", self.last_threat)
             self.events = list(events)
             self.services = list(services)
@@ -191,7 +189,6 @@ class AgentState:
                 "memoryMb": round(self.memory_mb, 1),
                 "bayanihan": {
                     "contributions": self.sig_contributions,
-                    "usersProtected": self.users_protected,
                 },
                 "lastThreat": self.last_threat,
                 "protected": self.protected,

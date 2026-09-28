@@ -10,7 +10,7 @@ interface DetectionLog {
   action: string;
 }
 
-export function useDashboardState(intervalMs = 2000) {
+export function useDashboardState(intervalMs = 1000) {
   const [cpuData, setCpuData] = useState(
     Array.from({ length: 60 }, (_, i) => ({ time: i, usage: 0 }))
   );
@@ -19,16 +19,24 @@ export function useDashboardState(intervalMs = 2000) {
   const live = tray.connected;
   const liveCpu = tray.stats?.cpu ?? 0;
 
+  // Hold the latest reading in a ref so the interval below can read it without
+  // being listed as a dependency. It used to depend on liveCpu directly, which
+  // meant React tore down and recreated the timer every time the value changed,
+  // restarting the countdown each time — that is why the line advanced in fits
+  // and starts rather than at a steady rate.
+  const liveCpuRef = useRef(liveCpu);
+  liveCpuRef.current = liveCpu;
+
   useEffect(() => {
     const interval = setInterval(() => {
       setCpuData(prev => [
         ...prev.slice(1),
-        { time: prev[prev.length - 1].time + 1, usage: liveCpu },
+        { time: prev[prev.length - 1].time + 1, usage: liveCpuRef.current },
       ]);
     }, intervalMs);
 
     return () => clearInterval(interval);
-  }, [liveCpu, intervalMs]);
+  }, [intervalMs]);
 
   // Expose ONLY real data. No mock fallback.
   const eProtected = tray.status?.protected ?? false;
@@ -38,7 +46,6 @@ export function useDashboardState(intervalMs = 2000) {
   const eMemory = tray.stats?.memory ?? 0;
   const eMemoryMb = tray.stats?.memoryMb ?? 0;
   const eSigContrib = tray.stats?.bayanihan?.contributions ?? 0;
-  const eUsersProtected = tray.stats?.bayanihan?.usersProtected ?? 0;
   const eLastThreat = tray.stats?.lastThreat ?? null;
   const eLogs = (live && tray.events) ? tray.events : [];
 
@@ -71,7 +78,6 @@ export function useDashboardState(intervalMs = 2000) {
     eMemory,
     eMemoryMb,
     eSigContrib,
-    eUsersProtected,
     eLastThreat,
     eLogs,
     detectionLogsContainerRef,
