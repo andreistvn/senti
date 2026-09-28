@@ -7,9 +7,13 @@ transactions into it and periodically reconciles it against what is on-chain, so
 dashboard can render the ledger without blocking on RPC round-trips.
 """
 
+import platform
+import threading
 import time
 import uuid
 from datetime import datetime
+
+import psutil
 from typing import Optional, Dict, List, Any
 
 from sqlalchemy import create_engine, inspect, text, Column, Integer, String, Float, Boolean
@@ -21,6 +25,9 @@ from config import (
     SESSION_TIMEOUT_SECONDS,
     MULTICHAIN_ENABLED,
     MULTICHAIN_STREAM_NAME,
+    TELEMETRY_SAMPLE_INTERVAL,
+    TELEMETRY_SCENARIO,
+    TELEMETRY_RECORD,
 )
 
 # Admin credentials (kept in memory for POC)
@@ -83,6 +90,35 @@ class DBLedgerEntry(Base):
     score = Column(String)
     created_at = Column(Float)                    # local insert time, for stable ordering
 
+class DBTelemetryReading(Base):
+    """
+    One resource-consumption sample, kept so the dataset can be analysed later.
+
+    Chapter 3 defines resource consumption as "CPU usage (%) and RAM consumption
+    (MB) tracked at one-minute intervals", and the statistical treatment calls for
+    the mean, sample variance and an independent-samples t-test over those
+    readings. Overwriting a single current value on the agent row — which is what
+    used to happen — makes all three impossible, so every sample is appended here.
+
+    `scenario` labels the run (the paper's three traffic scenarios) and `system`
+    distinguishes SentiNet from a traditional-IDPS baseline measured the same way,
+    which is the comparison the t-test is for.
+    """
+    __tablename__ = "telemetry_readings"
+    id = Column(Integer, primary_key=True, index=True)
+    ts = Column(Float, index=True)       # unix time of the sample
+    timestamp = Column(String)           # HH:MM:SS, for eyeballing
+    source = Column(String, index=True)  # 'relay' or 'agent'
+    node = Column(String, index=True)    # hostname or agent name
+    mac = Column(String, index=True)     # agents only
+    cpu_percent = Column(Float)
+    ram_mb = Column(Float)
+    ram_percent = Column(Float)          # system-wide, for context
+    protected = Column(Boolean)          # agent protection state at sample time
+    scenario = Column(String, index=True)
+    system = Column(String, index=True)  # 'sentinet' | whatever a baseline is named
+
+
 class DBPolicy(Base):
     __tablename__ = "policy"
     id = Column(Integer, primary_key=True)
@@ -100,8 +136,9 @@ class DBAgent(Base):
     mac = Column(String)
     state = Column(String)
     sync_progress = Column(Integer)
-    cpu = Column(Integer)
-    ram = Column(Integer)
+    cpu = Column(Float)              # percent, of the agent's SentiNet process
+    ram = Column(Float)              # percent of system RAM — display only
+    ram_mb = Column(Float)           # RSS in MB — the figure the paper specifies
     connected_since = Column(String)
     packets_processed = Column(Integer)
 
@@ -116,17 +153,24 @@ def _migrate_schema():
     otherwise keep the old ledger_entries shape and blow up on the new columns.
     """
     inspector = inspect(engine)
-    if 'ledger_entries' not in inspector.get_table_names():
-        return
+    tables = set(inspector.get_table_names())
 
-    existing = {col['name'] for col in inspector.get_columns('ledger_entries')}
-    additions = {'txid': 'VARCHAR', 'created_at': 'FLOAT'}
+    # SQLite types are advisory, so widening cpu/ram from Integer to Float needs
+    # no ALTER — only genuinely new columns do.
+    additions = {
+        'ledger_entries': {'txid': 'VARCHAR', 'created_at': 'FLOAT'},
+        'agents': {'ram_mb': 'FLOAT'},
+    }
 
     with engine.begin() as conn:
-        for name, sql_type in additions.items():
-            if name not in existing:
-                conn.execute(text(f'ALTER TABLE ledger_entries ADD COLUMN {name} {sql_type}'))
-                print(f'[DB] Migrated ledger_entries: added column {name}.')
+        for table, columns in additions.items():
+            if table not in tables:
+                continue
+            existing = {col['name'] for col in inspector.get_columns(table)}
+            for name, sql_type in columns.items():
+                if name not in existing:
+                    conn.execute(text(f'ALTER TABLE {table} ADD COLUMN {name} {sql_type}'))
+                    print(f'[DB] Migrated {table}: added column {name}.')
 
 
 _migrate_schema()
@@ -178,16 +222,48 @@ def upsert_agent(agent_data: Dict[str, Any]) -> None:
     db.commit()
     db.close()
 
-def update_agent_telemetry(mac: str, cpu: float, ram: float, agent_state: Optional[str] = None) -> None:
+def update_agent_telemetry(
+    mac: str,
+    cpu: float,
+    ram: float,
+    agent_state: Optional[str] = None,
+    ram_mb: Optional[float] = None,
+    protected: Optional[bool] = None,
+) -> None:
+    """
+    Store an agent's latest reading for the dashboard, and append a sample.
+
+    cpu and ram are no longer truncated with int(): a t-test over percentages
+    loses real precision if 12.9 is recorded as 12.
+    """
     db = SessionLocal()
-    db_agent = db.query(DBAgent).filter(DBAgent.mac == mac).first()
-    if db_agent:
-        db_agent.cpu = int(cpu)
-        db_agent.ram = int(ram)
-        if agent_state:
-            db_agent.state = agent_state
-        db.commit()
-    db.close()
+    node_name = None
+    try:
+        db_agent = db.query(DBAgent).filter(DBAgent.mac == mac).first()
+        if db_agent:
+            db_agent.cpu = float(cpu)
+            db_agent.ram = float(ram)
+            if ram_mb is not None:
+                db_agent.ram_mb = float(ram_mb)
+            if agent_state:
+                db_agent.state = agent_state
+            node_name = db_agent.name
+            db.commit()
+    finally:
+        db.close()
+
+    # Only agents reporting MB give us a paper-compliant sample; an older agent
+    # build sending percent only is recorded without one rather than guessed at.
+    if node_name is not None:
+        record_reading(
+            source='agent',
+            node=node_name,
+            cpu_percent=cpu,
+            ram_mb=ram_mb if ram_mb is not None else 0.0,
+            ram_percent=ram,
+            mac=mac,
+            protected=protected,
+        )
 
 
 def remove_agent(mac: str) -> None:
@@ -197,6 +273,167 @@ def remove_agent(mac: str) -> None:
         db.delete(db_agent)
         db.commit()
     db.close()
+
+
+# ─── Resource telemetry ────────────────────────────────────────────────────
+#
+# Chapter 3 wants CPU usage (%) and RAM consumption (MB) at one-minute intervals,
+# retained so the mean, sample variance and an independent-samples t-test can be
+# computed later. The dashboards refresh every few seconds, so the recorded
+# dataset is deliberately sampled on its own slower cadence: live display and the
+# paper's dataset are different requirements and shouldn't share a rate.
+
+_relay_proc = psutil.Process()
+# psutil's first cpu_percent() call always returns 0.0 — it needs a prior call to
+# measure against. Prime it at import so the first real reading is meaningful.
+_relay_proc.cpu_percent(None)
+
+# When each source was last written to telemetry_readings, keyed by 'relay' or a
+# MAC. Agents push telemetry roughly every second; only one sample per interval
+# is persisted.
+_last_recorded: Dict[str, float] = {}
+_record_lock = threading.Lock()
+
+
+def _should_record(key: str, now: float) -> bool:
+    """True at most once per TELEMETRY_SAMPLE_INTERVAL per source."""
+    if not TELEMETRY_RECORD:
+        return False
+    with _record_lock:
+        last = _last_recorded.get(key)
+        if last is not None and (now - last) < TELEMETRY_SAMPLE_INTERVAL:
+            return False
+        _last_recorded[key] = now
+        return True
+
+
+def record_reading(
+    source: str,
+    node: str,
+    cpu_percent: float,
+    ram_mb: float,
+    ram_percent: Optional[float] = None,
+    mac: Optional[str] = None,
+    protected: Optional[bool] = None,
+    system: str = 'sentinet',
+) -> None:
+    """Append one resource-consumption sample. Call freely; rate limiting is here."""
+    now = time.time()
+    if not _should_record(mac or source, now):
+        return
+
+    db = SessionLocal()
+    try:
+        db.add(DBTelemetryReading(
+            ts=now,
+            timestamp=datetime.fromtimestamp(now).strftime('%H:%M:%S'),
+            source=source,
+            node=node,
+            mac=mac,
+            cpu_percent=float(cpu_percent),
+            ram_mb=float(ram_mb),
+            ram_percent=float(ram_percent) if ram_percent is not None else None,
+            protected=protected,
+            scenario=TELEMETRY_SCENARIO or None,
+            system=system,
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+
+def measure_relay() -> Dict[str, float]:
+    """
+    This relay process's own CPU and memory.
+
+    Process-level rather than system-wide: the hypothesis is about the footprint
+    of SentiNet against a traditional IDPS, and a machine-wide reading would
+    include the browser, the dashboard's dev server and everything else, so any
+    difference could not be attributed to SentiNet.
+    """
+    with _relay_proc.oneshot():
+        cpu = _relay_proc.cpu_percent(None)
+        rss_mb = _relay_proc.memory_info().rss / (1024 * 1024)
+    return {
+        'cpu_percent': round(cpu, 2),
+        'ram_mb': round(rss_mb, 2),
+        'ram_percent': round(psutil.virtual_memory().percent, 2),
+    }
+
+
+class RelayTelemetrySampler(threading.Thread):
+    """Records the relay's own resource consumption on the paper's interval."""
+
+    def __init__(self) -> None:
+        super().__init__(daemon=True, name='relay-telemetry')
+        self._stop = threading.Event()
+        self.node = platform.node() or 'relay'
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def run(self) -> None:
+        # Sample more often than we record so a stopped relay exits promptly;
+        # record_reading() enforces the real interval.
+        while not self._stop.wait(5.0):
+            try:
+                m = measure_relay()
+                record_reading(
+                    source='relay',
+                    node=self.node,
+                    cpu_percent=m['cpu_percent'],
+                    ram_mb=m['ram_mb'],
+                    ram_percent=m['ram_percent'],
+                )
+            except Exception as exc:
+                print(f'[Telemetry] Relay sample failed: {exc}')
+
+
+_relay_sampler = RelayTelemetrySampler()
+
+
+def start_telemetry_sampler() -> None:
+    if not TELEMETRY_RECORD:
+        print('[Telemetry] Recording disabled (TELEMETRY_RECORD=false).')
+        return
+    if not _relay_sampler.is_alive():
+        _relay_sampler.start()
+        label = TELEMETRY_SCENARIO or 'unlabelled'
+        print(
+            f'[Telemetry] Recording every {TELEMETRY_SAMPLE_INTERVAL:.0f}s '
+            f'(scenario: {label}).'
+        )
+
+
+def stop_telemetry_sampler() -> None:
+    _relay_sampler.stop()
+
+
+def get_readings(scenario: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Every recorded sample, oldest first — the dataset for the statistics."""
+    db = SessionLocal()
+    try:
+        q = db.query(DBTelemetryReading)
+        if scenario:
+            q = q.filter(DBTelemetryReading.scenario == scenario)
+        rows = q.order_by(DBTelemetryReading.ts.asc()).all()
+        return [
+            {
+                'ts': r.ts,
+                'timestamp': r.timestamp,
+                'source': r.source,
+                'node': r.node,
+                'mac': r.mac,
+                'cpuPercent': r.cpu_percent,
+                'ramMb': r.ram_mb,
+                'ramPercent': r.ram_percent,
+                'protected': r.protected,
+                'scenario': r.scenario,
+                'system': r.system,
+            } for r in rows
+        ]
+    finally:
+        db.close()
 
 
 # ─── MultiChain Integration ────────────────────────────────────────────────
@@ -382,6 +619,7 @@ def get_agents() -> List[Dict[str, Any]]:
             'syncProgress': a.sync_progress,
             'cpu': a.cpu,
             'ram': a.ram,
+            'ramMb': a.ram_mb,
             'connectedSince': a.connected_since,
             'packetsProcessed': a.packets_processed
         } for a in db_agents
@@ -478,8 +716,11 @@ def get_telemetry_summary() -> Dict[str, Any]:
     ).first()
     db.close()
 
-    avg_cpu = int(sum(a.cpu for a in agents) / len(agents)) if agents else 0
-    avg_ram = int(sum(a.ram for a in agents) / len(agents)) if agents else 0
+    # The dashboard tile is labelled "Relay Node CPU", so report the relay's own
+    # process usage. This used to be the mean across all connected agents, which
+    # was both mislabelled and redundant — per-agent figures are already in the
+    # agent list, and Chapter 3 asks for each node's own footprint.
+    relay = measure_relay()
 
     chain = get_chain_status()
     chain_live = chain['enabled'] and chain['online'] and chain['streamReady']
@@ -496,8 +737,9 @@ def get_telemetry_summary() -> Dict[str, Any]:
         last_sync = "--:--:--"
 
     return {
-        'cpu': avg_cpu,
-        'ram': avg_ram,
+        'cpu': relay['cpu_percent'],
+        'ram': relay['ram_percent'],
+        'ramMb': relay['ram_mb'],
         'latency': chain['latencyMs'] if chain_live else 0,
         'blockHeight': block_height,
         'lastSyncTime': last_sync,

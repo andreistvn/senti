@@ -438,7 +438,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                   </div>
                 </div>
                 <div className="flex-1 flex flex-col gap-2">
-                  <div className="flex justify-between text-sm font-bold uppercase"><span>RAM Allocation</span><span className="font-['JetBrains_Mono',_monospace]">{telemetry.ram}%</span></div>
+                  <div className="flex justify-between text-sm font-bold uppercase"><span>Relay Node RAM</span><span className="font-['JetBrains_Mono',_monospace]">{telemetry.ramMb.toFixed(1)} MB</span></div>
                   <div className="w-full h-8 border border-[#e2e8f0] p-1 bg-white">
                     <div className="h-full bg-[#1a73e8] transition-all duration-500" style={{ width: `${telemetry.ram}%` }} />
                   </div>

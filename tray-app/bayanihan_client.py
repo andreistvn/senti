@@ -129,7 +129,15 @@ class BayanihanClient:
         else:
             print("[BayanihanClient] Cannot send attack report: Not connected to Relay Node")
 
-    def send_telemetry(self, cpu: float, ram: float, state: str = None):
+    def send_telemetry(self, cpu: float, ram: float, state: str = None,
+                       ram_mb: float = None, protected: bool = None):
+        """
+        Report resource consumption to the relay.
+
+        ram is the system-wide percentage the dashboard gauge uses; ram_mb is this
+        process's RSS in megabytes, which is what Chapter 3 specifies and what the
+        relay records for analysis.
+        """
         if self.connected and self.agent_info:
             try:
                 payload = {
@@ -137,6 +145,10 @@ class BayanihanClient:
                     "cpu": cpu,
                     "ram": ram
                 }
+                if ram_mb is not None:
+                    payload["ramMb"] = ram_mb
+                if protected is not None:
+                    payload["protected"] = protected
                 if state:
                     payload["state"] = state
                 self.sio.emit("telemetry_report", payload)

@@ -163,6 +163,28 @@ machine for connection errors.
 
 ---
 
+## Collecting resource-consumption data
+
+A demo run and a *measurement* run are different things. To record the CPU (%) and
+RAM (MB) readings Chapter 3's analysis needs, start the relay with a scenario label:
+
+```bash
+TELEMETRY_SCENARIO=baseline            ./launch_scripts/start_relay_node.sh
+TELEMETRY_SCENARIO=arp_poison_100pps   ./launch_scripts/start_relay_node.sh
+TELEMETRY_SCENARIO=arp_flood_1000pps   ./launch_scripts/start_relay_node.sh
+```
+
+Readings are written every 60 seconds, so a 10-minute run per scenario gives
+roughly ten samples per node. Export when finished:
+
+```bash
+python experiments/export_telemetry.py --scenario arp_flood_1000pps
+```
+
+See [`admin-backend/README.md`](admin-backend/README.md) for what is measured and why.
+
+---
+
 ## Step 3 — Establish a benign baseline (optional but recommended)
 
 From the attacker machine, or any agent machine:
