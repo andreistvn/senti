@@ -283,10 +283,17 @@ def remove_agent(mac: str) -> None:
 # dataset is deliberately sampled on its own slower cadence: live display and the
 # paper's dataset are different requirements and shouldn't share a rate.
 
-_relay_proc = psutil.Process()
+# The relay is measured HOST-wide, unlike the agents. The agent figure feeds the
+# comparison against a traditional IDPS, so it has to isolate SentiNet from
+# whatever else the user runs on their own laptop. The relay's figure is not
+# research data — it is operational monitoring for an administrator, on a node
+# dedicated to hosting the relay. "Is this box coping?" is a host-level question,
+# and a host-level answer also captures multichaind and the dashboard server
+# without having to enumerate them.
+#
 # psutil's first cpu_percent() call always returns 0.0 — it needs a prior call to
 # measure against. Prime it at import so the first real reading is meaningful.
-_relay_proc.cpu_percent(None)
+psutil.cpu_percent(None)
 
 # When each source was last written to telemetry_readings, keyed by 'relay' or a
 # MAC. Agents push telemetry roughly every second; only one sample per interval
@@ -344,20 +351,18 @@ def record_reading(
 
 def measure_relay() -> Dict[str, float]:
     """
-    This relay process's own CPU and memory.
+    The relay host's CPU and memory.
 
-    Process-level rather than system-wide: the hypothesis is about the footprint
-    of SentiNet against a traditional IDPS, and a machine-wide reading would
-    include the browser, the dashboard's dev server and everything else, so any
-    difference could not be attributed to SentiNet.
+    Host-wide on purpose — see the note above. ram_mb is memory in use on the
+    machine, not one process's RSS, so it is directly comparable to what an
+    administrator would see in Task Manager or top.
     """
-    with _relay_proc.oneshot():
-        cpu = _relay_proc.cpu_percent(None)
-        rss_mb = _relay_proc.memory_info().rss / (1024 * 1024)
+    mem = psutil.virtual_memory()
     return {
-        'cpu_percent': round(cpu, 2),
-        'ram_mb': round(rss_mb, 2),
-        'ram_percent': round(psutil.virtual_memory().percent, 2),
+        'cpu_percent': round(psutil.cpu_percent(None), 2),
+        'ram_mb': round(mem.used / (1024 * 1024), 2),
+        'ram_percent': round(mem.percent, 2),
+        'ram_total_mb': round(mem.total / (1024 * 1024), 2),
     }
 
 
@@ -740,6 +745,7 @@ def get_telemetry_summary() -> Dict[str, Any]:
         'cpu': relay['cpu_percent'],
         'ram': relay['ram_percent'],
         'ramMb': relay['ram_mb'],
+        'ramTotalMb': relay['ram_total_mb'],
         'latency': chain['latencyMs'] if chain_live else 0,
         'blockHeight': block_height,
         'lastSyncTime': last_sync,

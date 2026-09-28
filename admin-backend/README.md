@@ -96,11 +96,19 @@ Chapter 3 defines resource consumption as **CPU usage (%) and RAM consumption
 (MB) tracked at one-minute intervals**, then analyses it with the mean, sample
 variance and an independent-samples t-test against a traditional-IDPS baseline.
 
-Both the relay and each agent measure **their own process**, not the whole
-machine — a machine-wide reading also counts the browser, the dashboards' dev
-servers and VM overhead, so a difference could not be attributed to SentiNet.
-RAM is reported as RSS in megabytes; the system-wide percentage is kept alongside
-it only to drive the existing dashboard gauges.
+**Agents measure their own process**, not the whole machine. The agent figure is
+what the traditional-IDPS comparison rests on, and an endpoint also runs the
+user's own software — a machine-wide reading would count the browser and VM
+overhead, so a difference could not be attributed to SentiNet. RAM is reported as
+RSS in megabytes; the system-wide percentage is kept alongside it only to drive
+the dashboard gauge.
+
+**The relay is measured host-wide**, deliberately. Its numbers are not research
+data — the benchmarking in Chapter 3 is about agent performance, and the relay
+exists to bridge Client Isolation rather than to be evaluated. What the admin
+dashboard needs is operational: "is this box coping?", on a node dedicated to
+hosting the relay. A host-level reading also captures `multichaind` and the
+dashboard server without enumerating them.
 
 Readings accumulate in the `telemetry_readings` table rather than overwriting a
 current value, because the mean, variance and t-test all need every sample.
