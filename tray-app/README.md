@@ -11,13 +11,13 @@ that the web dashboard reads for **live** state.
 
 ## What's inside
 
-| File | Role |
-|------|------|
+| File               | Role                                                                    |
+| ------------------ | ----------------------------------------------------------------------- |
 | `sentinet_tray.py` | Entry point. Builds the tray icon + menu, starts the API and simulator. |
-| `api_server.py`    | Loopback JSON API on `127.0.0.1:8770` (stdlib only, CORS enabled). |
-| `state.py`         | Thread-safe agent state + the traffic/threat simulator. |
-| `config.py`        | Host/port + dashboard URL (override via env vars). |
-| `requirements.txt` | `pystray`, `pillow`. |
+| `api_server.py`    | Loopback JSON API on `127.0.0.1:8770` (stdlib only, CORS enabled).      |
+| `state.py`         | Thread-safe agent state + the traffic/threat simulator.                 |
+| `config.py`        | Host/port + dashboard URL (override via env vars).                      |
+| `requirements.txt` | `pystray`, `pillow`.                                                    |
 
 ## Run it
 
@@ -43,34 +43,35 @@ Right-click for: **Protection Active** (toggle), **Open Dashboard**, **Quit**.
    ```
 2. With the tray app running, open the dashboard (or use tray → **Open Dashboard**).
    The header badge turns green **"TRAY CONNECTED"** and the Protection card,
-   counters, telemetry, Bayanihan tracker, detection log and diagnostics all show
+   counters, telemetry, Bayanihan tracker and detection log all show
    live data from the tray. Toggling from either side updates the other.
 3. If the tray isn't running, the dashboard automatically falls back to its own
    mock data and shows an amber **"MOCK MODE"** badge — nothing breaks.
 
 ## Configuration (environment variables)
 
-| Variable | Default | Meaning |
-|----------|---------|---------|
-| `SENTINET_API_HOST` | `127.0.0.1` | API bind host |
-| `SENTINET_API_PORT` | `8770` | API port (must match the dashboard client) |
-| `SENTINET_DASHBOARD_URL` | `http://localhost:5173` | where "Open Dashboard" navigates |
-| `SENTINET_SIM_TICK` | `1.0` | simulator tick in seconds |
+| Variable                 | Default                 | Meaning                                    |
+| ------------------------ | ----------------------- | ------------------------------------------ |
+| `SENTINET_API_HOST`      | `127.0.0.1`             | API bind host                              |
+| `SENTINET_API_PORT`      | `8770`                  | API port (must match the dashboard client) |
+| `SENTINET_DASHBOARD_URL` | `http://localhost:5173` | where "Open Dashboard" navigates           |
+| `SENTINET_SIM_TICK`      | `1.0`                   | simulator tick in seconds                  |
 
 If you change the port, also update `BASE_URL` in
 `src/app/lib/trayClient.ts` so the dashboard polls the right place.
 
 ## API reference
 
-| Method | Path | Returns |
-|--------|------|---------|
-| GET  | `/api/status` | `{ protected, relay, version, since }` |
-| POST | `/api/toggle` | flips protection → new status |
-| GET  | `/api/stats`  | `{ inspected, dropped, passed, blocked, cpu, memory, bayanihan:{contributions,usersProtected}, lastThreat, protected }` |
-| GET  | `/api/events` | `{ events: [{ id, timestamp, sourceMac, attackType, tier, action }] }` |
-| GET  | `/api/health` | `{ services: [{ id, name, status, detail, uptime }] }` |
+| Method | Path          | Returns                                                                                                                 |
+| ------ | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/status` | `{ protected, relay, version, since }`                                                                                  |
+| POST   | `/api/toggle` | flips protection → new status                                                                                           |
+| GET    | `/api/stats`  | `{ inspected, dropped, passed, blocked, cpu, memory, bayanihan:{contributions,usersProtected}, lastThreat, protected }` |
+| GET    | `/api/events` | `{ events: [{ id, timestamp, sourceMac, attackType, tier, action }] }`                                                  |
+| GET    | `/api/health` | `{ services: [{ id, name, status, detail, uptime }] }`                                                                  |
 
 Quick check:
+
 ```bash
 curl http://127.0.0.1:8770/api/status
 curl -X POST http://127.0.0.1:8770/api/toggle
