@@ -13,6 +13,7 @@ Implements the contract endpoints for the admin dashboard:
 - GET /policy — get current policy config
 - PUT /policy — update policy config
 - GET /telemetry/summary — get telemetry + blockchain metrics
+- GET /telemetry/readings — recorded CPU/RAM samples for analysis
 - GET /analytics/threat-volume — get threat volume history
 """
 
@@ -32,7 +33,9 @@ import socketio
 async def lifespan(_app: FastAPI):
     """Bring the MultiChain ledger worker up with the server and down with it."""
     state.start_ledger_worker()
+    state.start_telemetry_sampler()
     yield
+    state.stop_telemetry_sampler()
     state.stop_ledger_worker()
 
 
@@ -77,8 +80,9 @@ class AgentResponse(BaseModel):
     mac: str
     state: str
     syncProgress: int
-    cpu: int
-    ram: int
+    cpu: float
+    ram: float                 # percent of system RAM — display gauge
+    ramMb: Optional[float] = None   # RSS in MB — the figure Chapter 3 specifies
     connectedSince: str
     packetsProcessed: int
 
@@ -105,8 +109,11 @@ class PolicyResponse(BaseModel):
 
 
 class TelemetrySummaryResponse(BaseModel):
-    cpu: int
-    ram: int
+    # Floats, not ints: truncating a CPU percentage loses real precision, and the
+    # paper's variance calculation is computed over these readings.
+    cpu: float
+    ram: float
+    ramMb: float = 0.0
     latency: int
     blockHeight: int
     lastSyncTime: str
@@ -260,6 +267,29 @@ async def ledger_status(sentinet_admin_session: Optional[str] = Cookie(None)):
     return state.get_chain_status()
 
 
+@app.get('/telemetry/readings')
+async def telemetry_readings(
+    scenario: Optional[str] = None,
+    sentinet_admin_session: Optional[str] = Cookie(None),
+):
+    """
+    Every recorded resource-consumption sample.
+
+    This is the dataset Chapter 3's statistical treatment consumes — CPU usage (%)
+    and RAM consumption (MB) per node, at the configured interval, labelled by
+    scenario. Filter with ?scenario=arp_flood_1000pps to isolate one run.
+    """
+    if not sentinet_admin_session:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    digital_id = state.validate_session(sentinet_admin_session)
+    if not digital_id:
+        raise HTTPException(status_code=401, detail='Session expired')
+
+    rows = state.get_readings(scenario)
+    return {'count': len(rows), 'scenario': scenario, 'readings': rows}
+
+
 # ─── Policy Endpoints ────────────────────────────────────────────────────────
 
 @app.get('/policy', response_model=PolicyResponse)
@@ -391,10 +421,14 @@ async def register_agent(sid, data):
 async def telemetry_report(sid, data):
     mac = data.get("mac")
     cpu = data.get("cpu", 0)
-    ram = data.get("ram", 0)
+    ram = data.get("ram", 0)                 # system-wide percent, for the gauge
+    ram_mb = data.get("ramMb")               # this agent's RSS in MB — the paper's figure
+    protected = data.get("protected")
     agent_state = data.get("state")
     if mac:
-        state.update_agent_telemetry(mac, cpu, ram, agent_state)
+        state.update_agent_telemetry(
+            mac, cpu, ram, agent_state, ram_mb=ram_mb, protected=protected
+        )
 
 @sio.event
 async def attack_report(sid, data):

@@ -49,7 +49,8 @@ class AgentState:
 
         # Telemetry
         self.cpu: float = 4.0
-        self.memory: int = 84
+        self.memory: int = 84          # system-wide percent, gauge only
+        self.memory_mb: float = 0.0    # daemon RSS in MB (Chapter 3's figure)
 
         # Bayanihan
         self.sig_contributions: int = 0
@@ -123,6 +124,7 @@ class AgentState:
             self.blocked = stats.get("blocked", self.blocked)
             self.cpu = stats.get("cpu", self.cpu)
             self.memory = stats.get("memory", self.memory)
+            self.memory_mb = stats.get("memoryMb", self.memory_mb)
             self.sig_contributions = bayanihan.get("contributions", self.sig_contributions)
             self.users_protected = bayanihan.get("usersProtected", self.users_protected)
             self.last_threat = stats.get("lastThreat", self.last_threat)
@@ -186,6 +188,7 @@ class AgentState:
                 "blocked": self.blocked,
                 "cpu": round(self.cpu, 1),
                 "memory": self.memory,
+                "memoryMb": round(self.memory_mb, 1),
                 "bayanihan": {
                     "contributions": self.sig_contributions,
                     "usersProtected": self.users_protected,

@@ -34,6 +34,12 @@ MultiChain (Tier 3 ledger) — see `.env.example` for the full list:
 - `MULTICHAIN_RPC_USER` / `MULTICHAIN_RPC_PASSWORD` — From `~/.multichain/<chain>/multichain.conf`
 - `MULTICHAIN_STREAM_NAME` — Threat stream (default: `threat_logs`)
 
+Resource telemetry:
+
+- `TELEMETRY_SAMPLE_INTERVAL` — Seconds between recorded readings (default: `60`)
+- `TELEMETRY_SCENARIO` — Label for the current measurement run (default: blank)
+- `TELEMETRY_RECORD` — Set `false` to stop recording (default: `true`)
+
 ## MultiChain Ledger
 
 Threat reports are published to a permissioned MultiChain stream over JSON-RPC. All
@@ -78,6 +84,48 @@ All endpoints except health check require valid session authentication.
 ### Ledger
 - `GET /ledger` — List blockchain ledger entries (newest first)
 - `GET /ledger/status` — MultiChain node health, block height and publish counters
+
+### Telemetry
+
+- `GET /telemetry/summary` — The relay's own CPU (%) / RAM (MB), chain metrics
+- `GET /telemetry/readings` — Every recorded resource sample; `?scenario=` filters
+
+## Resource Telemetry
+
+Chapter 3 defines resource consumption as **CPU usage (%) and RAM consumption
+(MB) tracked at one-minute intervals**, then analyses it with the mean, sample
+variance and an independent-samples t-test against a traditional-IDPS baseline.
+
+Both the relay and each agent measure **their own process**, not the whole
+machine — a machine-wide reading also counts the browser, the dashboards' dev
+servers and VM overhead, so a difference could not be attributed to SentiNet.
+RAM is reported as RSS in megabytes; the system-wide percentage is kept alongside
+it only to drive the existing dashboard gauges.
+
+Readings accumulate in the `telemetry_readings` table rather than overwriting a
+current value, because the mean, variance and t-test all need every sample.
+Recording is rate-limited per source, so the dashboards can keep refreshing every
+second while the dataset stays on the paper's one-minute cadence.
+
+### Running a measurement run
+
+```bash
+TELEMETRY_SCENARIO=arp_flood_1000pps ./launch_scripts/start_relay_node.sh
+```
+
+Then export the dataset:
+
+```bash
+python experiments/export_telemetry.py --scenario arp_flood_1000pps
+```
+
+That writes a CSV and prints per-group **n, mean and sample variance (n-1)** —
+the inputs to the t-test. It does not perform the test; the inferential step is
+left to SPSS, Excel or scipy.
+
+Each row carries a `system` column (default `sentinet`) so a traditional-IDPS
+baseline measured the same way can sit in the same table for comparison, and a
+`protected` flag recording whether the agent was capturing at the time.
 
 ### Policy
 - `GET /policy` — Get current policy config

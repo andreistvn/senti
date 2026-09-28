@@ -96,7 +96,8 @@ class DaemonState:
 
         # Telemetry
         self.cpu: float = 4.0
-        self.memory: int = 84
+        self.memory: int = 84          # system-wide percent, for the gauge
+        self.memory_mb: float = 0.0    # this process's RSS in MB (what the paper wants)
 
         # Bayanihan
         self.sig_contributions: int = 0
@@ -173,6 +174,7 @@ class DaemonState:
                     "blocked": self.blocked,
                     "cpu": round(self.cpu, 1),
                     "memory": self.memory,
+                    "memoryMb": round(self.memory_mb, 1),
                     "bayanihan": {
                         "contributions": self.sig_contributions,
                         "usersProtected": self.users_protected,
@@ -287,36 +289,65 @@ class CaptureEngine(threading.Thread):
                 self.bayanihan_client.send_attack_report(threat_event)
 
 class TelemetryEngine(threading.Thread):
-    """Background thread that tracks real CPU and memory usage."""
+    """
+    Tracks this daemon's own CPU and memory consumption.
+
+    Chapter 3 defines resource consumption as "CPU usage (%) and RAM consumption
+    (MB)". Two corrections against what this used to do:
+
+    * It measured psutil.cpu_percent() and virtual_memory().percent, which are
+      machine-wide. The hypothesis is that SentiNet uses less CPU than a
+      traditional IDPS, so the reading has to be attributable to SentiNet — a
+      machine-wide figure also counts the browser, the dashboards and VM
+      overhead. It now measures this process.
+    * RAM was reported as a percentage. The paper specifies megabytes, so RSS in
+      MB is now the primary figure; the system-wide percentage is kept alongside
+      it purely for the existing gauge in the agent dashboard.
+    """
 
     def __init__(self, state: DaemonState, bayanihan_client: BayanihanClient) -> None:
         super().__init__(daemon=True, name="telemetry-engine")
         self.state = state
         self.bayanihan_client = bayanihan_client
         self._stop = threading.Event()
+        self._proc = psutil.Process()
+        # psutil's first cpu_percent() call returns 0.0 because it has no earlier
+        # sample to compare against. Prime it so the first real reading counts.
+        self._proc.cpu_percent(None)
 
     def stop(self) -> None:
         self._stop.set()
 
+    def _measure(self) -> tuple:
+        """(cpu_percent, rss_mb, system_ram_percent) for this process."""
+        with self._proc.oneshot():
+            cpu = self._proc.cpu_percent(None)
+            rss_mb = self._proc.memory_info().rss / (1024 * 1024)
+        return round(cpu, 2), round(rss_mb, 2), round(psutil.virtual_memory().percent, 2)
+
     def run(self) -> None:
         while not self._stop.is_set():
             time.sleep(SIM_TICK_SECONDS)
-            
+
             is_protected = self.state.is_protected()
-            
-            if is_protected:
-                cpu = psutil.cpu_percent(interval=None)
-                mem = psutil.virtual_memory().percent
-            else:
-                cpu = 0
-                mem = 0
-            
+            cpu, ram_mb, ram_percent = self._measure()
+
+            # Protection OFF used to report a fabricated 0 for both. The relay now
+            # records these readings as research data, so send the real numbers and
+            # let the protection flag say whether capture was active — a zero that
+            # means "dormant" is indistinguishable from a genuine zero in a dataset.
             with self.state._lock:
                 self.state.cpu = cpu
-                self.state.memory = mem
-                
-            if is_protected:
-                self.bayanihan_client.send_telemetry(cpu, mem, "PROTECTED")
+                self.state.memory = ram_percent
+                self.state.memory_mb = ram_mb
+
+            self.bayanihan_client.send_telemetry(
+                cpu,
+                ram_percent,
+                "PROTECTED" if is_protected else "UNPROTECTED",
+                ram_mb=ram_mb,
+                protected=is_protected,
+            )
 
 
 # ── Main Daemon ────────────────────────────────────────────────────────────────
