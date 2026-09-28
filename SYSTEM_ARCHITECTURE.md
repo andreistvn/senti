@@ -46,7 +46,7 @@ This system is currently a **Proof-of-Concept (POC)**. Several complex distribut
 
 ### 3. Agent "Toggle" State
 *   **The Code:** The `tray-app` allows toggling the agent's protection ON and OFF.
-*   **The Reality:** When toggled OFF, the `TelemetryEngine` in the daemon artificially forces reported CPU and RAM metrics to `0` to reflect a "dormant" state on the dashboard. The agent also disconnects its WebSocket from the Relay Node, removing it from the Admin Dashboard's active list.
+*   **The Reality:** When toggled OFF the agent stops capturing, and its Bayanihan client disconnects from the Relay Node, removing it from the Admin Dashboard's active list. Telemetry keeps reporting real measurements either way — it used to force CPU and RAM to `0` to look "dormant", but those readings are now recorded as research data and a fabricated zero is indistinguishable from a genuine one in a dataset. Each reading carries a `protected` flag instead, so analysis can filter on capture state.
 
 ### 4. Admin Dashboard UI Mocks
 *   The **Export CSV** button in the Admin Dashboard generates a mock "Manual Blacklist" ledger entry when testing features.
