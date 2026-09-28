@@ -60,7 +60,7 @@ pip install -r requirements.txt
 cd ..
 ```
 
-Windows SETUP
+**Windows**
 
 ### 1. Admin Backend
 
@@ -208,12 +208,6 @@ python3 attack_generator.py poison --target <TARGET_IP> --gateway <GATEWAY_IP>
 - Digital ID: `ADM-7734-ALPHA`
 - Password: `SentiNet@2049`
 - MFA Code: `482910`
-
-**Agent Dashboard:**
-
-- Digital ID: _(Any value)_
-- Password: _(Any value)_
-- _(The agent dashboard currently accepts any mock credentials during this POC phase)._
 
 ## Troubleshooting
 
