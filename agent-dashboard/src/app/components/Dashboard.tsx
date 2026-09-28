@@ -18,7 +18,6 @@ export default function Dashboard() {
     eMemory,
     eMemoryMb,
     eSigContrib,
-    eUsersProtected,
     eLastThreat,
     eLogs,
     detectionLogsContainerRef,
@@ -144,12 +143,11 @@ export default function Dashboard() {
                 <div className="absolute inset-0 flex items-center justify-center">
                   <span className="text-[#111] text-base font-bold">{typeof eMemory === 'number' ? eMemory.toFixed(1) : eMemory}%</span>
                 </div>
-                <p className="text-[#888] text-[10px] tracking-wider mt-2">Total Machine Memory</p>
-                <p className="text-[#111] text-[11px] font-bold tracking-wider mt-1">
-                  SentiNet: {typeof eMemoryMb === 'number' ? eMemoryMb.toFixed(1) : eMemoryMb} MB
-                </p>
               </div>
               <p className="text-[#888] text-[10px] tracking-wider mt-2">Total Machine Memory</p>
+              <p className="text-[#111] text-[11px] font-bold tracking-wider mt-1">
+                SentiNet: {typeof eMemoryMb === 'number' ? eMemoryMb.toFixed(1) : eMemoryMb} MB
+              </p>
             </div>
           </div>
 

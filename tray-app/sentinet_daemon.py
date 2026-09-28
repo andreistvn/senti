@@ -101,7 +101,6 @@ class DaemonState:
 
         # Bayanihan
         self.sig_contributions: int = 0
-        self.users_protected: int = 40
 
         # Detection log (most recent first)
         self.events: deque = deque(maxlen=50)
@@ -177,7 +176,6 @@ class DaemonState:
                     "memoryMb": round(self.memory_mb, 1),
                     "bayanihan": {
                         "contributions": self.sig_contributions,
-                        "usersProtected": self.users_protected,
                     },
                     "lastThreat": self.last_threat,
                     "protected": self.protected,
@@ -285,8 +283,13 @@ class CaptureEngine(threading.Thread):
                     self.state.events.appendleft(threat_event)
                     self.state.last_threat = threat_event
                     
-                # Send to Relay Node via Bayanihan Layer
+                # Send to Relay Node via Bayanihan Layer. Count it: this is the
+                # agent's contribution to the shared ledger, and the counter used
+                # to be initialised to 0 and never incremented, so the dashboard
+                # reported "0 signatures" no matter how many threats were shared.
                 self.bayanihan_client.send_attack_report(threat_event)
+                with self.state._lock:
+                    self.state.sig_contributions += 1
 
 class TelemetryEngine(threading.Thread):
     """

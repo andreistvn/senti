@@ -38,7 +38,6 @@ export function useDashboardState(intervalMs = 2000) {
   const eMemory = tray.stats?.memory ?? 0;
   const eMemoryMb = tray.stats?.memoryMb ?? 0;
   const eSigContrib = tray.stats?.bayanihan?.contributions ?? 0;
-  const eUsersProtected = tray.stats?.bayanihan?.usersProtected ?? 0;
   const eLastThreat = tray.stats?.lastThreat ?? null;
   const eLogs = (live && tray.events) ? tray.events : [];
 
@@ -71,7 +70,6 @@ export function useDashboardState(intervalMs = 2000) {
     eMemory,
     eMemoryMb,
     eSigContrib,
-    eUsersProtected,
     eLastThreat,
     eLogs,
     detectionLogsContainerRef,

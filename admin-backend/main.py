@@ -109,11 +109,15 @@ class PolicyResponse(BaseModel):
 
 
 class TelemetrySummaryResponse(BaseModel):
+    # Real socket.io client count, so the dashboard header can stop claiming
+    # "WebSocket: Listening" from a hardcoded string.
+    connectedAgents: int = 0
     # Floats, not ints: truncating a CPU percentage loses real precision, and the
     # paper's variance calculation is computed over these readings.
-    cpu: float
-    ram: float
-    ramMb: float = 0.0
+    cpu: float          # host CPU percent on the relay machine
+    ram: float          # host RAM percent
+    ramMb: float = 0.0  # host RAM in use, MB
+    ramTotalMb: float = 0.0
     latency: int
     blockHeight: int
     lastSyncTime: str
@@ -335,7 +339,11 @@ async def get_telemetry_summary(sentinet_admin_session: Optional[str] = Cookie(N
     if not digital_id:
         raise HTTPException(status_code=401, detail='Session expired')
     
-    return state.get_telemetry_summary()
+    summary = state.get_telemetry_summary()
+    # sid_to_mac lives here rather than in state.py, so it is merged in at the
+    # edge instead of being threaded through the data layer.
+    summary['connectedAgents'] = len(mac_to_sid)
+    return summary
 
 
 # ─── Analytics Endpoints ────────────────────────────────────────────────────

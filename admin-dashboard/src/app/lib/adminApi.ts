@@ -33,8 +33,9 @@ export interface AdminLedgerEntry {
 
 export interface AdminTelemetry {
   cpu: number;
-  ram: number;      // percent of system RAM on the relay host
-  ramMb: number;    // the relay process's own RSS in MB
+  ram: number;         // percent of host RAM in use on the relay machine
+  ramMb: number;       // host RAM in use, MB
+  ramTotalMb: number;  // host RAM installed, MB
   latency: number;
 }
 
@@ -43,6 +44,7 @@ export interface AdminTelemetrySummary extends AdminTelemetry {
   lastSyncTime: string;
   chainStatus: 'HEALTHY' | 'DEGRADED';
   totalIncidents: number;
+  connectedAgents: number;
 }
 
 export interface AdminBlockchainMetrics {
@@ -90,12 +92,13 @@ const ADMIN_DASHBOARD_SEED: AdminDashboardSeed = {
   agents: [],
   logs: [],
   ledger: [],
-  telemetry: { cpu: 0, ram: 0, ramMb: 0, latency: 0 },
+  telemetry: { cpu: 0, ram: 0, ramMb: 0, ramTotalMb: 0, latency: 0 },
   blockchainMetrics: {
     blockHeight: 0,
     lastSyncTime: '--:--:--',
     chainStatus: 'HEALTHY',
     totalIncidents: 0,
+    connectedAgents: 0,
   },
   threatHistory: [],
   policyConfig: {
@@ -249,6 +252,7 @@ export async function getAdminDashboardSeed() {
       cpu: summary.cpu,
       ram: summary.ram,
       ramMb: summary.ramMb ?? 0,
+      ramTotalMb: summary.ramTotalMb ?? 0,
       latency: summary.latency,
     },
     blockchainMetrics: {
@@ -256,6 +260,7 @@ export async function getAdminDashboardSeed() {
       lastSyncTime: summary.lastSyncTime,
       chainStatus: summary.chainStatus,
       totalIncidents: summary.totalIncidents,
+      connectedAgents: summary.connectedAgents ?? 0,
     },
     threatHistory,
     policyConfig,
