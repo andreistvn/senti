@@ -22,6 +22,21 @@ ADMIN_CORS_ORIGINS = [
 # Session/auth
 SESSION_TIMEOUT_SECONDS = 3600
 
+# ─── Resource telemetry (Chapter 3: "Resource Consumption") ─────────────────
+# The paper defines resource consumption as "CPU usage (%) and RAM consumption
+# (MB) tracked at one-minute intervals". The dashboards refresh far faster than
+# that for live display, so the recorded dataset is sampled separately from what
+# the UI shows: readings land in the telemetry_readings table at this interval.
+TELEMETRY_SAMPLE_INTERVAL = float(os.getenv('TELEMETRY_SAMPLE_INTERVAL', '60'))
+
+# Set this during a measurement run to label the rows, e.g. "baseline",
+# "arp_poison_100pps", "arp_flood_1000pps" — the paper's three traffic
+# scenarios. Exported with every reading so runs can be told apart.
+TELEMETRY_SCENARIO = os.getenv('TELEMETRY_SCENARIO', '')
+
+# Record readings at all. Off means the dashboards still work, nothing is stored.
+TELEMETRY_RECORD = os.getenv('TELEMETRY_RECORD', 'true').lower() == 'true'
+
 # MultiChain JSON-RPC
 MULTICHAIN_ENABLED = os.getenv('MULTICHAIN_ENABLED', 'true').lower() == 'true'
 MULTICHAIN_RPC_URL = os.getenv('MULTICHAIN_RPC_URL', 'http://127.0.0.1:4365')
