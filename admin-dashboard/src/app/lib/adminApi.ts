@@ -33,7 +33,8 @@ export interface AdminLedgerEntry {
 
 export interface AdminTelemetry {
   cpu: number;
-  ram: number;
+  ram: number;      // percent of system RAM on the relay host
+  ramMb: number;    // the relay process's own RSS in MB
   latency: number;
 }
 
@@ -89,7 +90,7 @@ const ADMIN_DASHBOARD_SEED: AdminDashboardSeed = {
   agents: [],
   logs: [],
   ledger: [],
-  telemetry: { cpu: 0, ram: 0, latency: 0 },
+  telemetry: { cpu: 0, ram: 0, ramMb: 0, latency: 0 },
   blockchainMetrics: {
     blockHeight: 0,
     lastSyncTime: '--:--:--',
@@ -247,6 +248,7 @@ export async function getAdminDashboardSeed() {
     telemetry: {
       cpu: summary.cpu,
       ram: summary.ram,
+      ramMb: summary.ramMb ?? 0,
       latency: summary.latency,
     },
     blockchainMetrics: {

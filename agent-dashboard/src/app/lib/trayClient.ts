@@ -27,7 +27,8 @@ export interface TrayStats {
   passed: number;
   blocked: number;
   cpu: number;
-  memory: number;
+  memory: number;      // percent of total machine RAM
+  memoryMb?: number;   // this agent's own RSS in MB (Chapter 3's figure)
   bayanihan: { contributions: number; usersProtected: number };
   lastThreat: TrayLastThreat | null;
   protected: boolean;

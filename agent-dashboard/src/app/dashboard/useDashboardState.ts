@@ -66,6 +66,7 @@ export function useDashboardState(intervalMs = 2000) {
   const eDropped = tray.stats?.dropped ?? 0;
   const ePassed = tray.stats?.passed ?? 0;
   const eMemory = tray.stats?.memory ?? 0;
+  const eMemoryMb = tray.stats?.memoryMb ?? 0;
   const eSigContrib = tray.stats?.bayanihan?.contributions ?? 0;
   const eUsersProtected = tray.stats?.bayanihan?.usersProtected ?? 0;
   const eLastThreat = tray.stats?.lastThreat ?? null;
@@ -107,6 +108,7 @@ export function useDashboardState(intervalMs = 2000) {
     eDropped,
     ePassed,
     eMemory,
+    eMemoryMb,
     eSigContrib,
     eUsersProtected,
     eLastThreat,
