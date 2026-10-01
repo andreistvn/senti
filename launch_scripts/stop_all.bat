@@ -12,7 +12,9 @@
 setlocal
 
 cd /d "%~dp0.."
+set "ROOT=%CD%"
 if "%CHAIN_NAME%"=="" set "CHAIN_NAME=sentinet"
+set "CHAIN_DIR=%APPDATA%\MultiChain\%CHAIN_NAME%"
 
 echo.
 echo Stopping SentiNet services...
@@ -51,29 +53,37 @@ if "%KEEP_CHAIN%"=="1" (
     goto :done
 )
 
-set "MC_HOME=%LOCALAPPDATA%\SentiNet\multichain"
-where multichain-cli >nul 2>&1
-if errorlevel 1 (
-    if exist "%MC_HOME%\multichain-cli.exe" set "PATH=%MC_HOME%;%PATH%"
+:: Shutdown goes over JSON-RPC, not through multichain-cli. The CLI is unsigned
+:: and can be blocked by Smart App Control or an antivirus, in which case this
+:: script silently failed to stop anything and left an orphan multichaind holding
+:: the chain - which then broke the next start_relay_node.bat run. See
+:: windows\Test-ChainRpc.ps1.
+if not exist "%CHAIN_DIR%\multichain.conf" (
+    echo   No chain at %CHAIN_DIR% - skipping chain shutdown.
+    goto :chain_kill
 )
 
-where multichain-cli >nul 2>&1
-if errorlevel 1 (
-    echo   multichain-cli not found - skipping chain shutdown.
-    goto :done
-)
+echo   Asking MultiChain node '%CHAIN_NAME%' to stop...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\launch_scripts\windows\Test-ChainRpc.ps1" -ChainDir "%CHAIN_DIR%" -Action Stop
+set "RC=%ERRORLEVEL%"
 
-multichain-cli %CHAIN_NAME% getinfo >nul 2>&1
-if errorlevel 1 (
-    echo   MultiChain node '%CHAIN_NAME%' is not running.
-) else (
-    echo   Stopping MultiChain node '%CHAIN_NAME%'...
-    multichain-cli %CHAIN_NAME% stop >nul 2>&1
-    :: multichaind flushes its wallet on shutdown; give it a moment.
-    timeout /t 2 /nobreak >nul
-)
+if "%RC%"=="0" goto :chain_kill
+if "%RC%"=="1" goto :chain_absent
+if "%RC%"=="2" goto :chain_absent
 
-:: If the node ignored the graceful stop, close its window too.
+:: RC 3 = node up but credentials rejected, RC 4 = asked to stop and refused.
+:: Either way it is still holding the chain, and leaving it there is what breaks
+:: the next start_relay_node.bat run. multichaind flushes on a clean stop, so an
+:: unclean kill here is the lesser evil.
+echo   Node would not shut down over RPC - terminating multichaind.exe.
+taskkill /IM multichaind.exe /F /T >nul 2>&1
+goto :chain_kill
+
+:chain_absent
+echo   MultiChain node '%CHAIN_NAME%' was not running.
+
+:chain_kill
+:: Close the node's own window if our launcher opened one.
 taskkill /FI "WINDOWTITLE eq SentiNet MultiChain Node*" /F /T >nul 2>&1
 
 :done
