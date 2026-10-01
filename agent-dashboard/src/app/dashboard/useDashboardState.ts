@@ -45,6 +45,8 @@ export function useDashboardState(intervalMs = 1000) {
   const ePassed = tray.stats?.passed ?? 0;
   const eMemory = tray.stats?.memory ?? 0;
   const eMemoryMb = tray.stats?.memoryMb ?? 0;
+  const eIdentity = tray.stats?.identity ?? { hostname: '', ip: '', mac: '' };
+  const eBlacklist = tray.stats?.blacklist ?? [];
   const eSigContrib = tray.stats?.bayanihan?.contributions ?? 0;
   const eLastThreat = tray.stats?.lastThreat ?? null;
   const eLogs = (live && tray.events) ? tray.events : [];
@@ -77,6 +79,8 @@ export function useDashboardState(intervalMs = 1000) {
     ePassed,
     eMemory,
     eMemoryMb,
+    eIdentity,
+    eBlacklist,
     eSigContrib,
     eLastThreat,
     eLogs,
