@@ -126,10 +126,17 @@ multichaind --version >nul 2>&1
 if errorlevel 1 (
     echo.
     echo       WARNING: multichaind.exe would not run.
-    echo       Antivirus quarantining it is the usual cause on Windows -
-    echo       MultiChain's own README warns about this. Add an exclusion for:
-    echo           %MC_HOME%
-    echo       then re-run this script.
+    echo       Two causes, and they need different fixes:
+    echo        1. Antivirus quarantined it - MultiChain's own README warns
+    echo           about this. Add an exclusion for:
+    echo               %MC_HOME%
+    echo           then re-run this script.
+    echo        2. Windows 11 Smart App Control blocked it for being unsigned.
+    echo           Event Viewer, Applications and Services Logs, Microsoft,
+    echo           Windows, CodeIntegrity, Operational will name the file.
+    echo           Do NOT turn Smart App Control off - it cannot be turned back
+    echo           on without reinstalling Windows. Use a machine without it,
+    echo           or run the relay in a Linux VM, instead.
     set "MC_BROKEN=1"
 ) else (
     for /f "delims=" %%v in ('multichaind --version 2^>^&1') do (
