@@ -68,7 +68,35 @@ class BayanihanClient:
             print(f"[BayanihanClient] Received blacklist update: {data}")
             mac = data.get("mac")
             if mac and self.on_blacklist_update:
-                self.on_blacklist_update(mac)
+                self.on_blacklist_update(
+                    mac,
+                    origin="relay",
+                    attack_type=data.get("attackType", "Unknown"),
+                    confidence=data.get("confidence", "N/A"),
+                )
+
+        @self.sio.event
+        def blacklist_sync(data):
+            """
+            Full blacklist replayed by the relay on connect.
+
+            Without this an agent joining after a threat was reported would never
+            learn about it — the live broadcast only reaches agents that happen to
+            be connected at the moment of detection.
+            """
+            entries = data.get("entries", [])
+            print(f"[BayanihanClient] Syncing {len(entries)} blacklist entries from relay")
+            if not self.on_blacklist_update:
+                return
+            for e in entries:
+                mac = e.get("mac")
+                if mac:
+                    self.on_blacklist_update(
+                        mac,
+                        origin="relay",
+                        attack_type=e.get("attackType", "Unknown"),
+                        confidence=e.get("confidence", "N/A"),
+                    )
 
     def _connect_loop(self):
         while True:
