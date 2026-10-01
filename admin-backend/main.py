@@ -9,6 +9,7 @@ Implements the contract endpoints for the admin dashboard:
 - GET /agents/:id — get single agent
 - GET /threats — list threat log entries
 - GET /ledger — list blockchain ledger entries
+- GET /blacklist — network-wide blacklist shared with all agents
 - GET /ledger/status — MultiChain node health and publish counters
 - GET /policy — get current policy config
 - PUT /policy — update policy config
@@ -294,6 +295,25 @@ async def telemetry_readings(
     return {'count': len(rows), 'scenario': scenario, 'readings': rows}
 
 
+@app.get('/blacklist')
+async def list_blacklist(sentinet_admin_session: Optional[str] = Cookie(None)):
+    """
+    The network-wide blacklist the relay holds and replays to agents on connect.
+
+    This is the shared intelligence of the Bayanihan layer: every MAC any agent
+    has reported, with which agent reported it first.
+    """
+    if not sentinet_admin_session:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    digital_id = state.validate_session(sentinet_admin_session)
+    if not digital_id:
+        raise HTTPException(status_code=401, detail='Session expired')
+
+    entries = state.get_blacklist()
+    return {'count': len(entries), 'entries': entries}
+
+
 # ─── Policy Endpoints ────────────────────────────────────────────────────────
 
 @app.get('/policy', response_model=PolicyResponse)
@@ -425,6 +445,15 @@ async def register_agent(sid, data):
         mac_to_sid[mac] = sid
     state.upsert_agent(data)
 
+    # Replay the network-wide blacklist to this agent. Without this an agent that
+    # joins (or reconnects) after a threat was reported starts with an empty
+    # Tier-1 filter and never catches up — it would only ever learn about threats
+    # detected while it happened to be connected.
+    entries = state.get_blacklist()
+    if entries:
+        await sio.emit("blacklist_sync", {"entries": entries}, to=sid)
+        print(f"[WebSocket] Sent {len(entries)} blacklist entries to {data.get('name')}")
+
 @sio.event
 async def telemetry_report(sid, data):
     mac = data.get("mac")
@@ -455,10 +484,32 @@ async def attack_report(sid, data):
     if source_mac:
         # Save to threat log
         state.add_threat(source_mac, attack_type, tier, action, confidence)
-        
+
+        # Record it on the network-wide blacklist so late-joining agents can be
+        # caught up later. Returns False if another agent already reported it.
+        reporter = data.get("name") or sid_to_mac.get(sid) or "unknown"
+        is_new = state.add_to_blacklist(
+            source_mac,
+            reported_by=reporter,
+            attack_type=attack_type,
+            confidence=confidence,
+            tier=tier,
+        )
+
         # Broadcast to all other connected agents so they update their blacklists
-        print(f"[WebSocket] Broadcasting blacklist_update for {source_mac}")
-        await sio.emit("blacklist_update", {"mac": source_mac}, skip_sid=sid)
+        print(f"[WebSocket] Broadcasting blacklist_update for {source_mac}"
+              f"{'' if is_new else ' (already known)'}")
+        await sio.emit(
+            "blacklist_update",
+            {
+                "mac": source_mac,
+                "attackType": attack_type,
+                "confidence": confidence,
+                "tier": tier,
+                "reportedBy": reporter,
+            },
+            skip_sid=sid,
+        )
 
 
 if __name__ == '__main__':

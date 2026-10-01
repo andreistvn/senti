@@ -56,6 +56,10 @@ class AgentState:
         self.sig_contributions: int = 0
 
         # Detection log
+        # This node's own identity, pushed by the daemon.
+        self.identity: Dict[str, str] = {"hostname": "", "ip": "", "mac": ""}
+        self.blacklist: list = []
+
         self.events: list = []
         self.last_threat: Optional[Dict[str, str]] = None
 
@@ -124,6 +128,8 @@ class AgentState:
             self.cpu = stats.get("cpu", self.cpu)
             self.memory = stats.get("memory", self.memory)
             self.memory_mb = stats.get("memoryMb", self.memory_mb)
+            self.identity = snapshot.get("identity", self.identity)
+            self.blacklist = snapshot.get("blacklist", self.blacklist)
             self.sig_contributions = bayanihan.get("contributions", self.sig_contributions)
             self.last_threat = stats.get("lastThreat", self.last_threat)
             self.events = list(events)
@@ -192,6 +198,8 @@ class AgentState:
                 },
                 "lastThreat": self.last_threat,
                 "protected": self.protected,
+                "identity": self.identity,
+                "blacklist": self.blacklist,
             }
 
     def events_list(self) -> list:
