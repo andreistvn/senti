@@ -122,14 +122,21 @@ class DaemonState:
         self._on_change: List = []
 
     def add_to_blacklist(self, mac: str, origin: str = "local",
-                         attack_type: str = "Unknown", confidence: str = "N/A") -> None:
+                         attack_type: str = "Unknown", confidence: str = "N/A",
+                         reported_by: Optional[str] = None) -> None:
         """
         Add a MAC to the Tier-1 filter.
 
         `origin` records whether this node detected it itself or received it from
         the relay. That distinction is the visible evidence of the Bayanihan
         layer: an agent that was never attacked should show entries marked
-        "relay", proving the intelligence came from another node.
+        "relay", proving the intelligence came from another node. `reported_by`
+        names which agent originally reported it, for relay-origin entries.
+
+        `tier1Reported` tracks whether a *subsequent* Tier-1 hit on this MAC has
+        already been surfaced once (see CaptureEngine._process_packet) — without
+        it, every dropped packet from an already-blacklisted MAC would otherwise
+        re-report, which is exactly the flood Tier 1 exists to avoid.
         """
         with self._lock:
             self.blacklist.add(mac)
@@ -140,7 +147,23 @@ class DaemonState:
                     "origin": origin,
                     "attackType": attack_type,
                     "confidence": confidence,
+                    "reportedBy": reported_by,
+                    "tier1Reported": False,
                 }
+
+    def mark_blacklist_reported(self, mac: str) -> bool:
+        """
+        Mark a MAC's repeat/Bayanihan block as surfaced. Returns True only the
+        first time this is called for a given MAC, False on every call after —
+        that's what turns a sustained flood from one already-known MAC into a
+        single log line instead of one per dropped packet.
+        """
+        with self._lock:
+            meta = self.blacklist_meta.get(mac)
+            if meta is None or meta.get("tier1Reported"):
+                return False
+            meta["tier1Reported"] = True
+            return True
 
     def remove_from_blacklist(self, mac: str) -> None:
         with self._lock:
@@ -286,6 +309,42 @@ class CaptureEngine(threading.Thread):
                     self.state.blocked += 1
                     self.state.dropped += 1
                     # Ceasing processing simulates a block.
+
+                # Surface this once per MAC — the visible proof that either this
+                # agent's own earlier detection (Tier 1) or another agent's
+                # report relayed through Bayanihan (Tier 3) is now protecting
+                # this machine. Gated behind mark_blacklist_reported so a
+                # sustained flood from one MAC produces one log line, not one
+                # per dropped packet.
+                if self.state.mark_blacklist_reported(src_mac):
+                    meta = self.state.blacklist_meta.get(src_mac, {})
+                    added_at = meta.get("addedAt", datetime.now().strftime('%H:%M:%S'))
+
+                    if meta.get("origin") == "relay":
+                        tier_label = "Tier 3"
+                        reporter = meta.get("reportedBy") or "another agent"
+                        detail = f"blocked via Bayanihan, reported by {reporter} at {added_at}"
+                    else:
+                        tier_label = "Tier 1"
+                        detail = f"repeat block, first flagged locally at {added_at}"
+
+                    event_id = len(self.state.events) + 1
+                    threat_event = {
+                        "id": event_id,
+                        "timestamp": datetime.now().strftime('%H:%M:%S'),
+                        "sourceMac": src_mac,
+                        "attackType": meta.get("attackType", "Unknown"),
+                        "tier": tier_label,
+                        "action": "Blocked",
+                        "confidence": meta.get("confidence", "N/A"),
+                        "detail": detail,
+                    }
+
+                    with self.state._lock:
+                        self.state.events.appendleft(threat_event)
+                        self.state.last_threat = threat_event
+
+                    self.bayanihan_client.send_attack_report(threat_event)
                 return
             
             # If not blacklisted, it passes Tier 1. Proceed to Tier 2 ML logic.

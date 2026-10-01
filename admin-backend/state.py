@@ -80,6 +80,7 @@ class DBThreat(Base):
     attack_type = Column(String)
     tier = Column(String)
     action = Column(String)
+    detail = Column(String, nullable=True)  # e.g. "blocked via Bayanihan, reported by Agent A at 14:02:08"
 
 class DBLedgerEntry(Base):
     __tablename__ = "ledger_entries"
@@ -179,6 +180,7 @@ def _migrate_schema():
     additions = {
         'ledger_entries': {'txid': 'VARCHAR', 'created_at': 'FLOAT'},
         'agents': {'ram_mb': 'FLOAT'},
+        'threats': {'detail': 'VARCHAR'},
     }
 
     with engine.begin() as conn:
@@ -741,7 +743,8 @@ def get_threats() -> List[Dict[str, Any]]:
             'sourceMac': t.source_mac,
             'attackType': t.attack_type,
             'tier': t.tier,
-            'action': t.action
+            'action': t.action,
+            'detail': t.detail,
         } for t in db_threats
     ]
     db.close()
@@ -873,7 +876,7 @@ def get_threat_history() -> List[Dict[str, Any]]:
     return history
 
 
-def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confidence: str = "99.9%") -> Dict[str, Any]:
+def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confidence: str = "99.9%", detail: Optional[str] = None) -> Dict[str, Any]:
     db = SessionLocal()
     now = datetime.now().strftime('%H:%M:%S')
     db_threat = DBThreat(
@@ -881,12 +884,13 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
         source_mac=source_mac,
         attack_type=attack_type,
         tier=tier,
-        action=action
+        action=action,
+        detail=detail,
     )
     db.add(db_threat)
     db.commit()
     db.refresh(db_threat)
-    
+
     threat_dict = {
         'id': db_threat.id,
         'timestamp': db_threat.timestamp,
@@ -894,7 +898,8 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
         'attackType': db_threat.attack_type,
         'tier': db_threat.tier,
         'action': db_threat.action,
-        'confidence': confidence
+        'confidence': confidence,
+        'detail': db_threat.detail,
     }
     db.close()
     

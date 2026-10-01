@@ -73,6 +73,7 @@ class BayanihanClient:
                     origin="relay",
                     attack_type=data.get("attackType", "Unknown"),
                     confidence=data.get("confidence", "N/A"),
+                    reported_by=data.get("reportedBy"),
                 )
 
         @self.sio.event
@@ -96,6 +97,7 @@ class BayanihanClient:
                         origin="relay",
                         attack_type=e.get("attackType", "Unknown"),
                         confidence=e.get("confidence", "N/A"),
+                        reported_by=e.get("reportedBy"),
                     )
 
     def _connect_loop(self):
