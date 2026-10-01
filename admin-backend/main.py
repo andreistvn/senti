@@ -234,7 +234,10 @@ async def list_threats(sentinet_admin_session: Optional[str] = Cookie(None)):
         ThreatLogResponse(
             id=t['id'],
             timestamp=t['timestamp'],
-            message=f"[{t['tier']}] {t['attackType']} from {t['sourceMac']}. Action: {t['action']}"
+            message=(
+                f"[{t['tier']}] {t['attackType']} from {t['sourceMac']}. Action: {t['action']}"
+                + (f" - {t['detail']}" if t.get('detail') else "")
+            )
         )
         for t in threats
     ]
@@ -480,10 +483,11 @@ async def attack_report(sid, data):
     tier = data.get("tier", "Tier 2")
     action = data.get("action", "Blocked")
     confidence = data.get("confidence", "99.9%")
-    
+    detail = data.get("detail")
+
     if source_mac:
         # Save to threat log
-        state.add_threat(source_mac, attack_type, tier, action, confidence)
+        state.add_threat(source_mac, attack_type, tier, action, confidence, detail=detail)
 
         # Record it on the network-wide blacklist so late-joining agents can be
         # caught up later. Returns False if another agent already reported it.
