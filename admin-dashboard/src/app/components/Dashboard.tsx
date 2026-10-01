@@ -7,6 +7,7 @@ import { toast, Toaster } from 'sonner';
 import ThreatAnalyticsTab, { ThreatDataPoint } from './ThreatAnalyticsTab';
 import PolicyTab, { PolicyConfig, AgentHealth } from './PolicyTab';
 import { getAdminDashboardSeed, getAdminDashboardSeedFallback } from '../lib/adminApi';
+import type { AdminBlacklistEntry } from '../lib/adminApi';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,6 +74,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
   const [ledger, setLedger] = useState<LedgerEntry[]>(adminSeed.ledger);
 
+  const [blacklist, setBlacklist] = useState<AdminBlacklistEntry[]>(adminSeed.blacklist);
+
   const [telemetry, setTelemetry] = useState(adminSeed.telemetry);
 
   const [blockchainMetrics, setBlockchainMetrics] = useState({
@@ -98,6 +101,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       setAgents(seed.agents);
       setLogs(seed.logs);
       setLedger(seed.ledger);
+      setBlacklist(seed.blacklist);
       setTelemetry(seed.telemetry);
       setBlockchainMetrics(seed.blockchainMetrics);
       setThreatHistory(seed.threatHistory);
@@ -154,6 +158,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         if (!alive) return;
         setAgents(seed.agents);
         setLedger(seed.ledger);
+      setBlacklist(seed.blacklist);
         setTelemetry(seed.telemetry);
         setBlockchainMetrics(seed.blockchainMetrics);
         setThreatHistory(seed.threatHistory);
@@ -356,13 +361,16 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           </div>
         </section>
 
-        {/* Live Intelligence Stream */}
-        <section className="border border-[#cccccc] bg-white flex flex-col" style={{ minHeight: 200, maxHeight: 300 }}>
+        {/* Live Intelligence Stream + Network Blacklist, side by side. The stream
+            was a full-width, mostly-empty band; the blacklist is the evidence
+            that intelligence actually propagated between agents. */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 shrink-0 items-stretch" style={{ height: 240 }}>
+        <section className="border border-[#cccccc] bg-white flex flex-col min-h-0">
           <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest text-[#0F172A] flex justify-between items-center shrink-0">
             <span>Live Intelligence Stream (Socket.io)</span>
             <TerminalSquare className="w-5 h-5" />
           </div>
-          <div ref={logsContainerRef} className="flex-1 overflow-y-auto p-4 font-['JetBrains_Mono',_monospace] text-sm bg-white text-slate-800 flex flex-col gap-2">
+          <div ref={logsContainerRef} className="flex-1 min-h-0 overflow-y-auto p-4 font-['JetBrains_Mono',_monospace] text-sm bg-white text-slate-800 flex flex-col gap-2">
             {logs.map(log => (
               <div key={log.id} className="border-b border-slate-200 pb-2">
                 <span className="text-slate-500 mr-2">[{log.timestamp}]</span>
@@ -374,11 +382,34 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           </div>
         </section>
 
-        {/* Bottom row: Blockchain + Telemetry */}
-        <section className="grid grid-cols-2 gap-4 shrink-0">
+        <section className="border border-[#cccccc] bg-white flex flex-col min-h-0">
+          <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
+            <Cpu className="w-5 h-5" />Relay Telemetry
+          </div>
+          <div className="flex-1 min-h-0 p-5 flex flex-col justify-center">
+            <div className="flex gap-6">
+              <div className="flex-1 flex flex-col gap-2">
+                <div className="flex justify-between text-sm font-bold uppercase"><span>Relay Node CPU</span><span className="font-['JetBrains_Mono',_monospace]">{telemetry.cpu}%</span></div>
+                <div className="w-full h-8 border border-[#e2e8f0] p-1 bg-white">
+                  <div className="h-full bg-[#1a73e8] transition-all duration-500" style={{ width: `${telemetry.cpu}%` }} />
+                </div>
+              </div>
+              <div className="flex-1 flex flex-col gap-2">
+                <div className="flex justify-between text-sm font-bold uppercase"><span>Relay Node RAM</span><span className="font-['JetBrains_Mono',_monospace]">{(telemetry.ramMb / 1024).toFixed(1)} / {(telemetry.ramTotalMb / 1024).toFixed(1)} GB</span></div>
+                <div className="w-full h-8 border border-[#e2e8f0] p-1 bg-white">
+                  <div className="h-full bg-[#1a73e8] transition-all duration-500" style={{ width: `${telemetry.ram}%` }} />
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+        </div>
+
+        {/* Bottom row: Blockchain Ledger + Network Blacklist */}
+        <section className="grid grid-cols-2 gap-4 shrink-0 items-stretch" style={{ height: 400 }}>
 
           {/* Blockchain Ledger + Metrics */}
-          <div className="border border-[#cccccc] bg-white flex flex-col">
+          <div className="border border-[#cccccc] bg-white flex flex-col min-h-0">
             <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
               <Database className="w-5 h-5" />Blockchain Ledger (MultiChain)
               <button
@@ -404,9 +435,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
               ))}
             </div>
 
-
-
-            <div ref={ledgerContainerRef} className="flex-1 overflow-auto" style={{ maxHeight: 180 }}>
+            <div ref={ledgerContainerRef} className="flex-1 min-h-0 overflow-auto">
               <table className="w-full text-left border-collapse font-['JetBrains_Mono',_monospace] text-sm">
                 <thead className="bg-[#F8FAFC] border-b border-[#e2e8f0] sticky top-0 z-10">
                   <tr>
@@ -430,42 +459,43 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
             </div>
           </div>
 
-          {/* Relay Telemetry */}
-          <div className="border border-[#cccccc] bg-white flex flex-col">
-            <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
-              <Cpu className="w-5 h-5" />Relay Telemetry &amp; Governance
-            </div>
-            <div className="flex-1 p-5 flex flex-col gap-5 justify-between">
-              <div className="flex gap-6">
-                <div className="flex-1 flex flex-col gap-2">
-                  <div className="flex justify-between text-sm font-bold uppercase"><span>Relay Node CPU</span><span className="font-['JetBrains_Mono',_monospace]">{telemetry.cpu}%</span></div>
-                  <div className="w-full h-8 border border-[#e2e8f0] p-1 bg-white">
-                    <div className="h-full bg-[#1a73e8] transition-all duration-500" style={{ width: `${telemetry.cpu}%` }} />
-                  </div>
-                </div>
-                <div className="flex-1 flex flex-col gap-2">
-                  <div className="flex justify-between text-sm font-bold uppercase"><span>Relay Node RAM</span><span className="font-['JetBrains_Mono',_monospace]">{(telemetry.ramMb / 1024).toFixed(1)} / {(telemetry.ramTotalMb / 1024).toFixed(1)} GB</span></div>
-                  <div className="w-full h-8 border border-[#e2e8f0] p-1 bg-white">
-                    <div className="h-full bg-[#1a73e8] transition-all duration-500" style={{ width: `${telemetry.ram}%` }} />
-                  </div>
-                </div>
-              </div>
-
-              {/* ML Threshold live indicator */}
-              <div className="border border-[#e2e8f0] p-3 flex justify-between items-center font-['JetBrains_Mono',_monospace] text-xs">
-                <span className="text-[#64748B] uppercase tracking-widest">ML Confidence Threshold</span>
-                <span className="font-bold text-[#1a73e8]">{policyConfig.mlThreshold.toFixed(2)}</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <button onClick={handleManualBlacklist} className="bg-[#0F172A] hover:bg-[#102245] text-white border border-[#0F172A] p-4 uppercase font-bold text-sm tracking-widest flex justify-center items-center gap-2 transition">
-                  <ShieldAlert className="w-5 h-5" />Manual Blacklist
-                </button>
-                <button onClick={handleFlush} className="bg-white hover:bg-[#F9FAFB] text-[#DC2626] border border-[#DC2626] p-4 uppercase font-bold text-sm tracking-widest flex justify-center items-center gap-2 transition">
-                  <RotateCcw className="w-5 h-5" />Network-Wide Flush
-                </button>
-              </div>
-            </div>
+          {/* Network Blacklist — the shared intelligence of the Bayanihan layer */}
+          <div className="border border-[#cccccc] bg-white flex flex-col min-h-0">
+          <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest text-[#0F172A] flex justify-between items-center shrink-0">
+            <span>Network Blacklist (Bayanihan)</span>
+            <span className="text-[10px] text-[#64748b] font-['JetBrains_Mono',_monospace]">
+              {blacklist.length} SHARED TO {blockchainMetrics.connectedAgents} AGENT{blockchainMetrics.connectedAgents === 1 ? '' : 'S'}
+            </span>
+          </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {blacklist.length === 0 ? (
+              <p className="p-4 text-[#64748b] text-xs">
+                No shared threats yet. A MAC appears here as soon as any agent reports it,
+                and is replayed to every agent that connects afterwards.
+              </p>
+            ) : (
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-[#f5f5f5]">
+                  <tr className="text-[#475569] text-[10px] uppercase tracking-widest">
+                    <th className="text-left p-3 border-r border-[#e2e8f0]">Source MAC</th>
+                    <th className="text-left p-3 border-r border-[#e2e8f0]">First Seen</th>
+                    <th className="text-left p-3 border-r border-[#e2e8f0]">Reported By</th>
+                    <th className="text-left p-3">Confidence</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {blacklist.map(b => (
+                    <tr key={b.mac} className="border-t border-[#e2e8f0]">
+                      <td className="p-3 border-r border-[#e2e8f0] font-bold font-['JetBrains_Mono',_monospace]">{b.mac}</td>
+                      <td className="p-3 border-r border-[#e2e8f0] font-['JetBrains_Mono',_monospace]">{b.firstSeen}</td>
+                      <td className="p-3 border-r border-[#e2e8f0]">{b.reportedBy}</td>
+                      <td className="p-3 font-['JetBrains_Mono',_monospace] text-[#1a73e8]">{b.confidence}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
           </div>
         </section>
 
