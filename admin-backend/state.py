@@ -119,6 +119,25 @@ class DBTelemetryReading(Base):
     system = Column(String, index=True)  # 'sentinet' | whatever a baseline is named
 
 
+class DBBlacklistEntry(Base):
+    """
+    The network-wide blacklist held by the relay.
+
+    Previously the relay forwarded each MAC as it arrived and kept no record, so
+    an agent connecting after a threat was reported started empty and never
+    caught up. Persisting the list lets the relay replay it on connect, which is
+    the "shared intelligence" half of the Bayanihan layer.
+    """
+    __tablename__ = "blacklist"
+    mac = Column(String, primary_key=True)
+    first_seen = Column(String)          # HH:MM:SS
+    first_seen_ts = Column(Float, index=True)
+    reported_by = Column(String)         # agent that detected it first
+    attack_type = Column(String)
+    confidence = Column(String)
+    tier = Column(String)
+
+
 class DBPolicy(Base):
     __tablename__ = "policy"
     id = Column(Integer, primary_key=True)
@@ -273,6 +292,76 @@ def remove_agent(mac: str) -> None:
         db.delete(db_agent)
         db.commit()
     db.close()
+
+
+# ─── Network blacklist ──────────────────────────────────────────────────────
+
+def add_to_blacklist(
+    mac: str,
+    reported_by: str = 'unknown',
+    attack_type: str = 'Unknown',
+    confidence: str = 'N/A',
+    tier: str = 'Tier 2',
+) -> bool:
+    """
+    Record a MAC on the network-wide blacklist.
+
+    Returns True if this is the first time it has been seen, so the caller can
+    decide whether a broadcast is warranted.
+    """
+    if not mac:
+        return False
+
+    db = SessionLocal()
+    try:
+        existing = db.query(DBBlacklistEntry).filter(DBBlacklistEntry.mac == mac).first()
+        if existing:
+            return False
+
+        now = time.time()
+        db.add(DBBlacklistEntry(
+            mac=mac,
+            first_seen=datetime.fromtimestamp(now).strftime('%H:%M:%S'),
+            first_seen_ts=now,
+            reported_by=reported_by,
+            attack_type=attack_type,
+            confidence=confidence,
+            tier=tier,
+        ))
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+def get_blacklist() -> List[Dict[str, Any]]:
+    """The whole blacklist, newest first."""
+    db = SessionLocal()
+    try:
+        rows = db.query(DBBlacklistEntry).order_by(DBBlacklistEntry.first_seen_ts.desc()).all()
+        return [
+            {
+                'mac': r.mac,
+                'firstSeen': r.first_seen,
+                'reportedBy': r.reported_by,
+                'attackType': r.attack_type,
+                'confidence': r.confidence,
+                'tier': r.tier,
+            } for r in rows
+        ]
+    finally:
+        db.close()
+
+
+def clear_blacklist() -> int:
+    """Drop every entry. Used by flush_db between demo runs."""
+    db = SessionLocal()
+    try:
+        n = db.query(DBBlacklistEntry).delete()
+        db.commit()
+        return n
+    finally:
+        db.close()
 
 
 # ─── Resource telemetry ────────────────────────────────────────────────────

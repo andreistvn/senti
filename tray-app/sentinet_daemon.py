@@ -107,18 +107,45 @@ class DaemonState:
         self.last_threat: Optional[Dict[str, str]] = None
 
         # Blacklist (Phase 2+)
+        # Tier 1 keeps a plain set for O(1) membership, as specified in Ch.3.
+        # blacklist_meta carries the display detail in parallel.
         self.blacklist: Set[str] = set()
+        self.blacklist_meta: Dict[str, Dict[str, str]] = {}
+
+        # This node's own identity, filled in by SentiNetDaemon once detected.
+        # The agent dashboard header used to print a hardcoded address.
+        self.hostname: str = ""
+        self.ip: str = ""
+        self.mac: str = ""
 
         # Change listeners
         self._on_change: List = []
 
-    def add_to_blacklist(self, mac: str) -> None:
+    def add_to_blacklist(self, mac: str, origin: str = "local",
+                         attack_type: str = "Unknown", confidence: str = "N/A") -> None:
+        """
+        Add a MAC to the Tier-1 filter.
+
+        `origin` records whether this node detected it itself or received it from
+        the relay. That distinction is the visible evidence of the Bayanihan
+        layer: an agent that was never attacked should show entries marked
+        "relay", proving the intelligence came from another node.
+        """
         with self._lock:
             self.blacklist.add(mac)
+            if mac not in self.blacklist_meta:
+                self.blacklist_meta[mac] = {
+                    "mac": mac,
+                    "addedAt": datetime.now().strftime("%H:%M:%S"),
+                    "origin": origin,
+                    "attackType": attack_type,
+                    "confidence": confidence,
+                }
 
     def remove_from_blacklist(self, mac: str) -> None:
         with self._lock:
             self.blacklist.discard(mac)
+            self.blacklist_meta.pop(mac, None)
 
     def is_blacklisted(self, mac: str) -> bool:
         # thread-safe enough for check, but using lock for strictness
@@ -179,6 +206,12 @@ class DaemonState:
                     },
                     "lastThreat": self.last_threat,
                     "protected": self.protected,
+                },
+                "blacklist": list(self.blacklist_meta.values()),
+                "identity": {
+                    "hostname": self.hostname,
+                    "ip": self.ip,
+                    "mac": self.mac,
                 },
                 "events": list(self.events),
                 "services": self._health_list(),
@@ -264,8 +297,6 @@ class CaptureEngine(threading.Thread):
             
             if score >= 0.50:
                 print(f"[Tier 2] THREAT DETECTED: {src_mac} (Score: {score:.2f})")
-                self.state.add_to_blacklist(src_mac)
-                
                 # Generate Attack Report format
                 event_id = len(self.state.events) + 1
                 now = datetime.now()
@@ -278,6 +309,13 @@ class CaptureEngine(threading.Thread):
                     "action": "Blocked",
                     "confidence": f"{score*100:.1f}%"
                 }
+
+                self.state.add_to_blacklist(
+                    src_mac,
+                    origin="local",
+                    attack_type=threat_event["attackType"],
+                    confidence=threat_event["confidence"],
+                )
                 
                 with self.state._lock:
                     self.state.events.appendleft(threat_event)
@@ -383,6 +421,9 @@ class SentiNetDaemon:
         }
         
         self.state = DaemonState()
+        self.state.hostname = hostname
+        self.state.ip = ip_addr
+        self.state.mac = mac_addr
         self.ml_engine = MLEngine()
         self.bayanihan_client = BayanihanClient(
             relay_url=RELAY_URL,

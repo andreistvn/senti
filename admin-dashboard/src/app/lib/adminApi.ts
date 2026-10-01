@@ -24,6 +24,15 @@ export interface AdminLogEntry {
   message: string;
 }
 
+export interface AdminBlacklistEntry {
+  mac: string;
+  firstSeen: string;
+  reportedBy: string;
+  attackType: string;
+  confidence: string;
+  tier: string;
+}
+
 export interface AdminLedgerEntry {
   blockId: string;
   timestamp: string;
@@ -52,6 +61,7 @@ export interface AdminBlockchainMetrics {
   lastSyncTime: string;
   chainStatus: 'HEALTHY' | 'DEGRADED';
   totalIncidents: number;
+  connectedAgents: number;
 }
 
 export interface AdminThreatPoint {
@@ -72,6 +82,7 @@ export interface AdminDashboardSeed {
   agents: AdminAgent[];
   logs: AdminLogEntry[];
   ledger: AdminLedgerEntry[];
+  blacklist: AdminBlacklistEntry[];
   telemetry: AdminTelemetry;
   blockchainMetrics: AdminBlockchainMetrics;
   threatHistory: AdminThreatPoint[];
@@ -92,6 +103,7 @@ const ADMIN_DASHBOARD_SEED: AdminDashboardSeed = {
   agents: [],
   logs: [],
   ledger: [],
+  blacklist: [],
   telemetry: { cpu: 0, ram: 0, ramMb: 0, ramTotalMb: 0, latency: 0 },
   blockchainMetrics: {
     blockHeight: 0,
@@ -115,6 +127,7 @@ function cloneSeed(): AdminDashboardSeed {
     agents: ADMIN_DASHBOARD_SEED.agents.map(agent => ({ ...agent })),
     logs: ADMIN_DASHBOARD_SEED.logs.map(entry => ({ ...entry })),
     ledger: ADMIN_DASHBOARD_SEED.ledger.map(entry => ({ ...entry })),
+    blacklist: ADMIN_DASHBOARD_SEED.blacklist.map(entry => ({ ...entry })),
     telemetry: { ...ADMIN_DASHBOARD_SEED.telemetry },
     blockchainMetrics: { ...ADMIN_DASHBOARD_SEED.blockchainMetrics },
     threatHistory: ADMIN_DASHBOARD_SEED.threatHistory.map(point => ({ ...point })),
@@ -232,10 +245,11 @@ export async function signOutAdmin() {
 
 export async function getAdminDashboardSeed() {
   const fallback = cloneSeed();
-  const [agents, logs, ledger, summary, threatHistory, policyConfig] = await Promise.all([
+  const [agents, logs, ledger, blacklistResp, summary, threatHistory, policyConfig] = await Promise.all([
     requestWithFallback('/agents', () => fallback.agents),
     requestWithFallback('/threats', () => fallback.logs),
     requestWithFallback('/ledger', () => fallback.ledger),
+    requestWithFallback<{ entries: AdminBlacklistEntry[] }>('/blacklist', () => ({ entries: fallback.blacklist })),
     requestWithFallback<AdminTelemetrySummary>('/telemetry/summary', () => ({
       ...fallback.telemetry,
       ...fallback.blockchainMetrics,
@@ -248,6 +262,7 @@ export async function getAdminDashboardSeed() {
     agents,
     logs,
     ledger,
+    blacklist: blacklistResp?.entries ?? [],
     telemetry: {
       cpu: summary.cpu,
       ram: summary.ram,

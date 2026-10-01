@@ -17,6 +17,8 @@ export default function Dashboard() {
     ePassed,
     eMemory,
     eMemoryMb,
+    eIdentity,
+    eBlacklist,
     eSigContrib,
     eLastThreat,
     eLogs,
@@ -34,7 +36,9 @@ export default function Dashboard() {
           <span className="text-white tracking-widest text-sm font-bold uppercase">SentiNet Agent Dashboard</span>
         </div>
         <div className="flex items-center gap-6 text-xs">
-          <span className="text-[#8899bb] tracking-wider">192.168.1.42 / A4:5E:60:E2:3B:1C</span>
+          <span className="text-[#8899bb] tracking-wider">
+            {eIdentity.ip || '—'} / {eIdentity.mac || '—'}
+          </span>
           {live ? (
             <span className="flex items-center gap-2 text-[#00ff88]">
               <span className="w-2 h-2 rounded-full bg-[#00ff88] animate-pulse inline-block" />
@@ -175,8 +179,8 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Row 3: Detection Log + Sidebar */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Row 3: Detection Log + Blacklist */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch" style={{ minHeight: 320 }}>
           <div className="lg:col-span-2 bg-white border border-[#cccccc] flex flex-col">
             <div className="px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5]">
               <p className="text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold">Detection Log</p>
@@ -212,35 +216,58 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="space-y-4">
-            {/* Bayanihan Tracker */}
-            <div className="bg-white border border-[#cccccc]">
-              <div className="flex items-center gap-2 px-4 py-3 border-b border-[#cccccc] bg-[#0d1b3e]">
-                <Award className="w-3.5 h-3.5 text-[#f59e0b]" strokeWidth={2} />
-                <span className="text-white text-[10px] tracking-widest uppercase font-bold">Bayanihan Contribution</span>
-              </div>
-              <div className="p-4">
-                <div className="flex items-baseline gap-2 mb-1">
-                  <span className="text-[#111] text-3xl font-bold tracking-widest">{eSigContrib}</span>
-                  <span className="text-[#888] text-[10px] tracking-wider">signatures</span>
+          <div className="flex flex-col">
+            {/* Tier-1 Blacklist — the visible evidence of the Bayanihan layer.
+                Entries marked "From Relay" were learned from another agent, so on
+                a node that was never attacked every row reads relay. That is the
+                collaborative defense shown directly, rather than inferred from a
+                dropped-packet counter. */}
+            <div className="bg-white border border-[#cccccc] flex flex-col flex-1 min-h-0">
+              <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-[#cccccc] bg-[#0d1b3e] shrink-0">
+                <div className="flex items-center gap-2">
+                  <Award className="w-3.5 h-3.5 text-[#f59e0b]" strokeWidth={2} />
+                  <span className="text-white text-[10px] tracking-widest uppercase font-bold">Tier-1 Blacklist</span>
                 </div>
-                <p className="text-[#555] text-[10px] tracking-wider mb-3">
-                  Your node submitted <span className="text-[#0d1b3e] font-bold">{eSigContrib} threat signatures</span> to the blockchain today.
-                </p>
-
+                <span className="text-[#8899bb] text-[10px] tracking-widest">
+                  {eBlacklist.length} BLOCKED &middot; {eSigContrib} SHARED
+                </span>
               </div>
-            </div>
 
-            {/* WebSocket Pulse */}
-            <div className="bg-white border border-[#cccccc]">
-              <PanelHeader icon={<Activity className="w-3.5 h-3.5 text-[#0d1b3e]" strokeWidth={2} />} title="WebSocket Pulse" />
-              <div className="p-4">
-                <div className="flex items-center gap-2 mb-1">
-                  <div className="w-2 h-2 bg-[#00aa55] animate-pulse" />
-                  <span className="text-[#111] text-xs tracking-widest font-bold">ACTIVE</span>
+              {eBlacklist.length === 0 ? (
+                <div className="p-4">
+                  <p className="text-[#888] text-[10px] tracking-wider">
+                    No blocked MACs yet. Entries appear when this node detects a threat,
+                    or when the relay shares one found by another agent.
+                  </p>
                 </div>
-                <p className="text-[#888] text-[10px] tracking-wider">Last update: {lastUpdate}s ago</p>
-              </div>
+              ) : (
+                <div className="flex-1 overflow-y-auto">
+                  <table className="w-full text-xs">
+                    <thead className="sticky top-0 bg-[#f5f5f5]">
+                      <tr className="text-[#555] text-[9px] tracking-widest uppercase">
+                        <th className="text-left p-2 font-bold">Source MAC</th>
+                        <th className="text-left p-2 font-bold">Added</th>
+                        <th className="text-left p-2 font-bold">Origin</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {eBlacklist.map(b => (
+                        <tr key={b.mac} className="border-t border-[#eee]">
+                          <td className="p-2 font-['JetBrains_Mono',_monospace] text-[#111]">{b.mac}</td>
+                          <td className="p-2 text-[#555] font-['JetBrains_Mono',_monospace]">{b.addedAt}</td>
+                          <td className="p-2">
+                            <span className={`text-[9px] tracking-widest uppercase font-bold px-1.5 py-0.5 ${
+                              b.origin === 'relay' ? 'bg-[#1a4fd6] text-white' : 'bg-[#e0e0e0] text-[#555]'
+                            }`}>
+                              {b.origin === 'relay' ? 'From Relay' : 'Local'}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           </div>
         </div>
