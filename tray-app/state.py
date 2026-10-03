@@ -54,6 +54,7 @@ class AgentState:
 
         # Bayanihan
         self.sig_contributions: int = 0
+        self.bayanihan_pending: int = 0
 
         # Detection log
         # This node's own identity, pushed by the daemon.
@@ -131,6 +132,7 @@ class AgentState:
             self.identity = snapshot.get("identity", self.identity)
             self.blacklist = snapshot.get("blacklist", self.blacklist)
             self.sig_contributions = bayanihan.get("contributions", self.sig_contributions)
+            self.bayanihan_pending = bayanihan.get("pending", self.bayanihan_pending)
             self.last_threat = stats.get("lastThreat", self.last_threat)
             self.events = list(events)
             self.services = list(services)
@@ -195,6 +197,7 @@ class AgentState:
                 "memoryMb": round(self.memory_mb, 1),
                 "bayanihan": {
                     "contributions": self.sig_contributions,
+                    "pending": self.bayanihan_pending,
                 },
                 "lastThreat": self.last_threat,
                 "protected": self.protected,

@@ -20,6 +20,7 @@ export default function Dashboard() {
     eIdentity,
     eBlacklist,
     eSigContrib,
+    eReportsPending,
     eLastThreat,
     eLogs,
     detectionLogsContainerRef,
@@ -230,6 +231,9 @@ export default function Dashboard() {
                 </div>
                 <span className="text-[#8899bb] text-[10px] tracking-widest">
                   {eBlacklist.length} BLOCKED &middot; {eSigContrib} SHARED
+                  {eReportsPending > 0 && (
+                    <span className="text-[#f59e0b]"> &middot; {eReportsPending} PENDING</span>
+                  )}
                 </span>
               </div>
 

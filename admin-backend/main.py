@@ -439,6 +439,78 @@ async def disconnect(sid):
     mac_to_sid.pop(mac, None)
     state.remove_agent(mac)
 
+async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str], reporter_name: str) -> Dict[str, Any]:
+    """
+    Record one attack report and fan it out to the rest of the mesh.
+
+    Shared by the live `attack_report` handler and `register_agent`'s backfill
+    of an agent's recent events on (re)connect, so a report an agent could only
+    deliver late still gets the exact same treatment — threat log, ledger
+    mirror (via state.add_threat), blacklist entry, and a broadcast to every
+    other connected agent — as one delivered on time.
+
+    Returns an ack dict. python-socketio sends an async handler's return value
+    back as the ack to the client's `sio.call(...)`, which is what lets the
+    agent-side queue in bayanihan_client.py know a report actually landed here
+    (not just that the socket write didn't throw).
+    """
+    source_mac = data.get("sourceMac")
+    if not source_mac:
+        return {"status": "error", "detail": "missing sourceMac"}
+
+    attack_type = data.get("attackType", "Anomalous ARP")
+    tier = data.get("tier", "Tier 2")
+    action = data.get("action", "Blocked")
+    confidence = data.get("confidence", "99.9%")
+    detail = data.get("detail")
+    client_event_id = data.get("clientEventId")
+
+    try:
+        threat_dict = state.add_threat(
+            source_mac, attack_type, tier, action, confidence,
+            detail=detail, client_event_id=client_event_id,
+        )
+    except Exception as exc:
+        print(f"[WebSocket] Failed to record attack report from {reporter_name}: {exc}")
+        return {"status": "error", "detail": str(exc)}
+
+    if not threat_dict.get('isNew', True):
+        # Already have this exact report (agent retry, or a backfill re-offering
+        # something that was in fact delivered live). Nothing further to do —
+        # the blacklist entry and broadcast already happened the first time.
+        return {"status": "ok", "id": threat_dict["id"], "duplicate": True}
+
+    # Record it on the network-wide blacklist so late-joining agents can be
+    # caught up later. Returns False if another agent already reported it.
+    is_new_blacklist = state.add_to_blacklist(
+        source_mac,
+        reported_by=reporter_name,
+        attack_type=attack_type,
+        confidence=confidence,
+        tier=tier,
+    )
+
+    # Broadcast to all other connected agents so they update their blacklists.
+    # skip_sid is None for a backfilled event (there is no "sid that just sent
+    # this" — it arrived bundled in register_agent), which broadcasts to
+    # everyone including the reconnecting agent; harmless, it already has it.
+    print(f"[WebSocket] Broadcasting blacklist_update for {source_mac}"
+          f"{'' if is_new_blacklist else ' (already known)'}")
+    await sio.emit(
+        "blacklist_update",
+        {
+            "mac": source_mac,
+            "attackType": attack_type,
+            "confidence": confidence,
+            "tier": tier,
+            "reportedBy": reporter_name,
+        },
+        skip_sid=reporter_sid,
+    )
+
+    return {"status": "ok", "id": threat_dict["id"], "duplicate": False}
+
+
 @sio.event
 async def register_agent(sid, data):
     print(f"[WebSocket] Agent registered: {data.get('name')} from {sid}")
@@ -457,6 +529,22 @@ async def register_agent(sid, data):
         await sio.emit("blacklist_sync", {"entries": entries}, to=sid)
         print(f"[WebSocket] Sent {len(entries)} blacklist entries to {data.get('name')}")
 
+    # Catch up on anything this agent detected but couldn't deliver earlier —
+    # e.g. the relay was down or restarting at the moment of detection. The
+    # agent's own BayanihanClient queue (tray-app/bayanihan_client.py) already
+    # retries every report until acknowledged, so in the common case this is a
+    # no-op; it's the second, independent path for the cases that queue itself
+    # might have missed (bug, or a report logged before this fix existed).
+    reporter = data.get("name") or mac or "unknown"
+    recent_events = data.get("recentEvents") or []
+    backfilled = 0
+    for event in recent_events:
+        result = await _ingest_attack_report(event, reporter_sid=None, reporter_name=reporter)
+        if result.get("status") == "ok" and not result.get("duplicate"):
+            backfilled += 1
+    if backfilled:
+        print(f"[WebSocket] Backfilled {backfilled} missed threat report(s) from {data.get('name')}")
+
 @sio.event
 async def telemetry_report(sid, data):
     mac = data.get("mac")
@@ -474,46 +562,15 @@ async def telemetry_report(sid, data):
 async def attack_report(sid, data):
     """
     Handle incoming Attack Report from a SentiNet agent.
-    Expected data: {"sourceMac": "...", "attackType": "...", "tier": "...", "action": "...", "confidence": "..."}
+    Expected data: {"sourceMac": "...", "attackType": "...", "tier": "...", "action": "...",
+                     "confidence": "...", "clientEventId": "..."}
+
+    Returns an ack dict — the agent's BayanihanClient uses `sio.call(...)` and
+    only considers the report delivered once this comes back with status "ok".
     """
     print(f"[WebSocket] Received attack report from {sid}: {data}")
-    
-    source_mac = data.get("sourceMac")
-    attack_type = data.get("attackType", "Anomalous ARP")
-    tier = data.get("tier", "Tier 2")
-    action = data.get("action", "Blocked")
-    confidence = data.get("confidence", "99.9%")
-    detail = data.get("detail")
-
-    if source_mac:
-        # Save to threat log
-        state.add_threat(source_mac, attack_type, tier, action, confidence, detail=detail)
-
-        # Record it on the network-wide blacklist so late-joining agents can be
-        # caught up later. Returns False if another agent already reported it.
-        reporter = data.get("name") or sid_to_mac.get(sid) or "unknown"
-        is_new = state.add_to_blacklist(
-            source_mac,
-            reported_by=reporter,
-            attack_type=attack_type,
-            confidence=confidence,
-            tier=tier,
-        )
-
-        # Broadcast to all other connected agents so they update their blacklists
-        print(f"[WebSocket] Broadcasting blacklist_update for {source_mac}"
-              f"{'' if is_new else ' (already known)'}")
-        await sio.emit(
-            "blacklist_update",
-            {
-                "mac": source_mac,
-                "attackType": attack_type,
-                "confidence": confidence,
-                "tier": tier,
-                "reportedBy": reporter,
-            },
-            skip_sid=sid,
-        )
+    reporter = data.get("name") or sid_to_mac.get(sid) or "unknown"
+    return await _ingest_attack_report(data, reporter_sid=sid, reporter_name=reporter)
 
 
 if __name__ == '__main__':
