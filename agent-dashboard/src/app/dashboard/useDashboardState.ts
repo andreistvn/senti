@@ -48,6 +48,11 @@ export function useDashboardState(intervalMs = 1000) {
   const eIdentity = tray.stats?.identity ?? { hostname: '', ip: '', mac: '' };
   const eBlacklist = tray.stats?.blacklist ?? [];
   const eSigContrib = tray.stats?.bayanihan?.contributions ?? 0;
+  // Reports this agent has queued for the relay but that haven't been
+  // acknowledged yet — see bayanihan_client.py's pending-report queue. Shown
+  // so a relay outage (or a report still retrying) is visible here instead of
+  // only showing up later as a gap on the admin dashboard.
+  const eReportsPending = tray.stats?.bayanihan?.pending ?? 0;
   const eLastThreat = tray.stats?.lastThreat ?? null;
   const eLogs = (live && tray.events) ? tray.events : [];
 
@@ -82,6 +87,7 @@ export function useDashboardState(intervalMs = 1000) {
     eIdentity,
     eBlacklist,
     eSigContrib,
+    eReportsPending,
     eLastThreat,
     eLogs,
     detectionLogsContainerRef,
