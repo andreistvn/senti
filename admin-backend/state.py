@@ -16,13 +16,14 @@ from datetime import datetime
 import psutil
 from typing import Optional, Dict, List, Any
 
-from sqlalchemy import create_engine, inspect, text, Column, Integer, String, Float, Boolean
+from sqlalchemy import create_engine, inspect, text, or_, Column, Integer, String, Float, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 import multichain
 from config import (
     DEFAULT_AGENTS,
     SESSION_TIMEOUT_SECONDS,
+    AGENT_STALE_SECONDS,
     MULTICHAIN_ENABLED,
     MULTICHAIN_STREAM_NAME,
     TELEMETRY_SAMPLE_INTERVAL,
@@ -81,6 +82,11 @@ class DBThreat(Base):
     tier = Column(String)
     action = Column(String)
     detail = Column(String, nullable=True)  # e.g. "blocked via Bayanihan, reported by Agent A at 14:02:08"
+    # Agent-generated uuid4, carried end-to-end from CaptureEngine. Lets add_threat()
+    # dedupe: once agent-side reporting can retry (BayanihanClient's pending-report
+    # queue) and backfill on reconnect (register_agent's recentEvents), the same
+    # detection can legitimately arrive here more than once.
+    client_event_id = Column(String, nullable=True, index=True)
 
 class DBLedgerEntry(Base):
     __tablename__ = "ledger_entries"
@@ -161,6 +167,7 @@ class DBAgent(Base):
     ram_mb = Column(Float)           # RSS in MB — the figure the paper specifies
     connected_since = Column(String)
     packets_processed = Column(Integer)
+    last_seen = Column(Float, nullable=True)  # unix time of the last register/telemetry; see get_agents()
 
 Base.metadata.create_all(bind=engine)
 
@@ -179,8 +186,8 @@ def _migrate_schema():
     # no ALTER — only genuinely new columns do.
     additions = {
         'ledger_entries': {'txid': 'VARCHAR', 'created_at': 'FLOAT'},
-        'agents': {'ram_mb': 'FLOAT'},
-        'threats': {'detail': 'VARCHAR'},
+        'agents': {'ram_mb': 'FLOAT', 'last_seen': 'FLOAT'},
+        'threats': {'detail': 'VARCHAR', 'client_event_id': 'VARCHAR'},
     }
 
     with engine.begin() as conn:
@@ -233,13 +240,15 @@ def upsert_agent(agent_data: Dict[str, Any]) -> None:
             cpu=0,
             ram=0,
             connected_since=now,
-            packets_processed=0
+            packets_processed=0,
+            last_seen=time.time(),
         )
         db.add(db_agent)
     else:
         db_agent.ip = agent_data.get('ip', db_agent.ip)
         db_agent.state = agent_data.get('state', db_agent.state)
-        
+        db_agent.last_seen = time.time()
+
     db.commit()
     db.close()
 
@@ -268,6 +277,7 @@ def update_agent_telemetry(
                 db_agent.ram_mb = float(ram_mb)
             if agent_state:
                 db_agent.state = agent_state
+            db_agent.last_seen = time.time()
             node_name = db_agent.name
             db.commit()
     finally:
@@ -712,7 +722,30 @@ def destroy_session(session_token: str) -> None:
 
 
 def get_agents() -> List[Dict[str, Any]]:
+    """
+    All agents, pruning any whose last heartbeat (register_agent or
+    telemetry_report) has gone stale.
+
+    remove_agent() — called from the Socket.IO `disconnect` handler — is not
+    enough on its own: that event can only fire for a connection *this* relay
+    process is itself holding. A hard-killed agent (stop_all.bat's
+    taskkill /F skips any graceful sio.disconnect()) or, especially, a relay
+    restart (in-memory connection state always resets, but the persisted
+    agents table never did) can both leave a row with no live socket left
+    anywhere to ever disconnect — a ghost with no automatic expiry. Pruning by
+    last_seen here means staleness self-heals on the very next poll instead of
+    depending on an event that may never come.
+    """
     db = SessionLocal()
+    cutoff = time.time() - AGENT_STALE_SECONDS
+    stale = db.query(DBAgent).filter(
+        or_(DBAgent.last_seen.is_(None), DBAgent.last_seen < cutoff)
+    ).all()
+    if stale:
+        for a in stale:
+            db.delete(a)
+        db.commit()
+
     db_agents = db.query(DBAgent).all()
     results = [
         {
@@ -876,8 +909,34 @@ def get_threat_history() -> List[Dict[str, Any]]:
     return history
 
 
-def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confidence: str = "99.9%", detail: Optional[str] = None) -> Dict[str, Any]:
+def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confidence: str = "99.9%",
+                detail: Optional[str] = None, client_event_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Insert one threat record. Idempotent when `client_event_id` is given: a
+    second call with the same id (an agent-side retry, or a register_agent
+    backfill of an already-delivered report) returns the existing row instead
+    of inserting a duplicate. Callers can check the returned `isNew` flag to
+    decide whether to also touch the blacklist / broadcast.
+    """
     db = SessionLocal()
+
+    if client_event_id:
+        existing = db.query(DBThreat).filter(DBThreat.client_event_id == client_event_id).first()
+        if existing:
+            threat_dict = {
+                'id': existing.id,
+                'timestamp': existing.timestamp,
+                'sourceMac': existing.source_mac,
+                'attackType': existing.attack_type,
+                'tier': existing.tier,
+                'action': existing.action,
+                'confidence': confidence,
+                'detail': existing.detail,
+                'isNew': False,
+            }
+            db.close()
+            return threat_dict
+
     now = datetime.now().strftime('%H:%M:%S')
     db_threat = DBThreat(
         timestamp=now,
@@ -886,6 +945,7 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
         tier=tier,
         action=action,
         detail=detail,
+        client_event_id=client_event_id,
     )
     db.add(db_threat)
     db.commit()
@@ -900,10 +960,11 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
         'action': db_threat.action,
         'confidence': confidence,
         'detail': db_threat.detail,
+        'isNew': True,
     }
     db.close()
-    
+
     # Try publishing to MultiChain
     write_to_multichain(threat_dict)
-    
+
     return threat_dict
