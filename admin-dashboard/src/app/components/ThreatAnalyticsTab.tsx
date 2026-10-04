@@ -3,7 +3,6 @@ import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
   ReferenceLine, ResponsiveContainer, BarChart, Bar, Legend,
 } from 'recharts';
-import { TrendingUp, BarChart2, AlertTriangle } from 'lucide-react';
 
 export interface ThreatDataPoint {
   time: string;
@@ -102,7 +101,7 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
             <span className="text-[#94A3B8] text-[10px] uppercase tracking-widest">{s.unit}</span>
             {s.alert && (
               <span className="flex items-center gap-1 text-[#DC2626] text-[10px] font-bold uppercase">
-                <AlertTriangle className="w-3 h-3" />Exceeds Limit
+                Exceeds Limit
               </span>
             )}
           </div>
@@ -112,7 +111,6 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
       {/* Live rolling time-series */}
       <section className="border border-[#cccccc] bg-white flex flex-col">
         <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
-          <TrendingUp className="w-5 h-5" />
           Live Network Traffic — ARP Packets Per Second
           {isOverLimit && (
             <span className="ml-auto bg-[#DC2626] text-white px-3 py-1 text-[10px] font-bold uppercase tracking-widest animate-pulse">
@@ -163,7 +161,6 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
       {/* Analytics: Daily / Weekly / Monthly */}
       <section className="border border-[#cccccc] bg-white flex flex-col">
         <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
-          <BarChart2 className="w-5 h-5" />
           Analytics — Daily / Weekly / Monthly
           <div className="ml-auto flex items-center gap-2">
             <button onClick={() => setPeriod('daily')} className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${period==='daily' ? 'bg-[#1E3A8A] text-white' : 'bg-white text-[#0F172A] border'} rounded`}>Daily</button>
@@ -212,7 +209,6 @@ export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
       {/* 24h historical distribution */}
       <section className="border border-[#cccccc] bg-white flex flex-col">
         <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
-          <BarChart2 className="w-5 h-5" />
           Threat Incident Distribution — Last 24 Hours (Simulated Historical)
         </div>
         <div className="p-4" style={{ height: 200 }}>
