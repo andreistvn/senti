@@ -128,16 +128,24 @@ class MLEngine:
         diffs = [timestamps[i] - timestamps[i-1] for i in range(1, len(timestamps))]
         if diffs:
             ia_mean = sum(diffs) / len(diffs)
-            ia_var = sum((x - ia_mean)**2 for x in diffs) / len(diffs)
+            # Sample variance (n-1), as the training data computed it.
+            ia_var = sum((x - ia_mean)**2 for x in diffs) / (len(diffs) - 1) if len(diffs) > 1 else 0.0
         else:
             ia_mean = 0.0
             ia_var = 0.0
             
-        # Calculate burstiness (max packets in any given 1-second interval)
-        buckets = defaultdict(int)
+        # Burstiness: sample variance of the packet counts in the window's five
+        # 1-second sub-intervals, matching how the training data defined it
+        # (model-training/README.md). Evenly paced traffic scores near zero; the
+        # same number of packets arriving in one spike scores high. Sub-intervals
+        # are counted back from the newest packet, and empty ones count as zero.
+        sub_intervals = int(self.window_size)
+        counts = [0] * sub_intervals
+        newest = timestamps[-1]
         for t in timestamps:
-            buckets[int(t)] += 1
-        burstiness = max(buckets.values()) if buckets else 0
+            counts[min(int(newest - t), sub_intervals - 1)] += 1
+        mean_count = len(timestamps) / sub_intervals
+        burstiness = sum((c - mean_count) ** 2 for c in counts) / (sub_intervals - 1)
         
         unique_ip_count = len(unique_ips)
         
