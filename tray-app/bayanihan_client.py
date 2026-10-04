@@ -127,6 +127,11 @@ class BayanihanClient:
             client_event_id = item["event"].get("clientEventId")
             if client_event_id:
                 self._pending[client_event_id] = item
+        # Set when a report is queued, so _report_loop delivers it at once
+        # instead of on its next retry tick. That tick is REPORT_RETRY_INTERVAL
+        # (2s) — fine for retries, but as the delay on a first delivery it would
+        # dominate the Time-to-Block every other agent sees.
+        self._report_wake = threading.Event()
         if self._pending:
             print(f"[BayanihanClient] Recovered {len(self._pending)} unsent report(s) from a previous run.")
 
@@ -186,13 +191,33 @@ class BayanihanClient:
             print(f"[BayanihanClient] Received blacklist update: {data}")
             mac = data.get("mac")
             if mac and self.on_blacklist_update:
-                self.on_blacklist_update(
+                is_new = self.on_blacklist_update(
                     mac,
                     origin="relay",
                     attack_type=data.get("attackType", "Unknown"),
                     confidence=data.get("confidence", "N/A"),
                     reported_by=data.get("reportedBy"),
                 )
+                # t_enforced in Chapter 3's Time-to-Block formula: the moment
+                # this node wrote the attacker's MAC into its Tier-1 blacklist.
+                enforced_at_ms = int(time.time() * 1000)
+
+                # Tell the relay, so it can pair this with the detecting node's
+                # t_detected. Only for a first-detection broadcast (it carries an
+                # eventId) and only if the MAC was genuinely new here — a node
+                # that already had it was protected earlier, not just now.
+                event_id = data.get("eventId")
+                if event_id and is_new:
+                    try:
+                        self.sio.emit("blacklist_enforced", {
+                            "eventId": event_id,
+                            "mac": mac,
+                            "agentMac": self.agent_info.get("mac"),
+                            "agentName": self.agent_info.get("name"),
+                            "enforcedAtMs": enforced_at_ms,
+                        })
+                    except Exception as exc:
+                        print(f"[BayanihanClient] Could not report enforcement of {mac}: {exc}")
 
         @self.sio.event
         def blacklist_sync(data):
@@ -292,6 +317,7 @@ class BayanihanClient:
                 self._store.remove(oldest_id)
             self._pending[client_event_id] = {"event": event, "attempts": 0}
         self._store.add(event)
+        self._report_wake.set()
 
         print(
             f"[BayanihanClient] Queued attack report for {event.get('sourceMac')} "
@@ -306,9 +332,13 @@ class BayanihanClient:
     def _report_loop(self) -> None:
         """Drain the pending-report queue whenever connected. Runs for the agent's lifetime."""
         while True:
+            # Wakes early when a report is queued; otherwise this is the retry
+            # tick. Cleared before flushing so a report queued mid-flush still
+            # triggers the next pass immediately.
+            self._report_wake.wait(REPORT_RETRY_INTERVAL)
+            self._report_wake.clear()
             if self.connected:
                 self._flush_pending()
-            time.sleep(REPORT_RETRY_INTERVAL)
 
     def _flush_pending(self) -> None:
         with self._pending_lock:
@@ -350,13 +380,15 @@ class BayanihanClient:
             )
 
     def send_telemetry(self, cpu: float, ram: float, state: str = None,
-                       ram_mb: float = None, protected: bool = None):
+                       ram_mb: float = None, protected: bool = None,
+                       scenario: str = None):
         """
         Report resource consumption to the relay.
 
         ram is the system-wide percentage the dashboard gauge uses; ram_mb is this
         process's RSS in megabytes, which is what Chapter 3 specifies and what the
-        relay records for analysis.
+        relay records for analysis. scenario is the traffic scenario this agent is
+        currently experiencing, which the relay stores alongside the reading.
         """
         if self.connected and self.agent_info:
             try:
@@ -371,6 +403,8 @@ class BayanihanClient:
                     payload["protected"] = protected
                 if state:
                     payload["state"] = state
+                if scenario:
+                    payload["scenario"] = scenario
                 self.sio.emit("telemetry_report", payload)
             except Exception as e:
                 pass
