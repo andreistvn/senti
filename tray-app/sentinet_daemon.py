@@ -32,7 +32,13 @@ import scapy.all as scapy
 from ml_engine import MLEngine
 from bayanihan_client import BayanihanClient
 
-from config import AGENT_VERSION, SIM_TICK_SECONDS, RELAY_URL
+from config import (
+    AGENT_VERSION,
+    SIM_TICK_SECONDS,
+    RELAY_URL,
+    FLOOD_PPS_THRESHOLD,
+    SCENARIO_WINDOW_SECONDS,
+)
 from ipc_protocol import (
     IpcServer,
     MSG_BLACKLIST_UPDATE,
@@ -99,6 +105,9 @@ class DaemonState:
         self.cpu: float = 4.0
         self.memory: int = 84          # system-wide percent, for the gauge
         self.memory_mb: float = 0.0    # this process's RSS in MB (what the paper wants)
+        # Traffic scenario this agent is currently experiencing — "normal",
+        # "poisoning" or "flooding". Set by TelemetryEngine; labels each reading.
+        self.scenario: str = "normal"
 
         # Bayanihan
         self.sig_contributions: int = 0
@@ -124,9 +133,9 @@ class DaemonState:
 
     def add_to_blacklist(self, mac: str, origin: str = "local",
                          attack_type: str = "Unknown", confidence: str = "N/A",
-                         reported_by: Optional[str] = None) -> None:
+                         reported_by: Optional[str] = None) -> bool:
         """
-        Add a MAC to the Tier-1 filter.
+        Add a MAC to the Tier-1 filter. Returns True if it was not already there.
 
         `origin` records whether this node detected it itself or received it from
         the relay. That distinction is the visible evidence of the Bayanihan
@@ -140,6 +149,7 @@ class DaemonState:
         re-report, which is exactly the flood Tier 1 exists to avoid.
         """
         with self._lock:
+            is_new = mac not in self.blacklist
             self.blacklist.add(mac)
             if mac not in self.blacklist_meta:
                 self.blacklist_meta[mac] = {
@@ -151,6 +161,7 @@ class DaemonState:
                     "reportedBy": reported_by,
                     "tier1Reported": False,
                 }
+            return is_new
 
     def mark_blacklist_reported(self, mac: str) -> bool:
         """
@@ -237,6 +248,7 @@ class DaemonState:
                     "cpu": round(self.cpu, 1),
                     "memory": self.memory,
                     "memoryMb": round(self.memory_mb, 1),
+                    "scenario": self.scenario,
                     "bayanihan": {
                         "contributions": self.sig_contributions,
                     },
@@ -371,6 +383,10 @@ class CaptureEngine(threading.Thread):
             score = self.ml_engine.process_packet(src_mac, op, src_ip, dst_ip)
             
             if score >= 0.50:
+                # t_detected in Chapter 3's Time-to-Block formula: the moment
+                # Tier 2 first classifies this MAC as malicious. Taken before
+                # anything else so logging and bookkeeping don't inflate it.
+                detected_at_ms = int(time.time() * 1000)
                 print(f"[Tier 2] THREAT DETECTED: {src_mac} (Score: {score:.2f})")
                 # Generate Attack Report format
                 event_id = len(self.state.events) + 1
@@ -383,7 +399,8 @@ class CaptureEngine(threading.Thread):
                     "attackType": "ARP Spoofing" if score > 0.8 else "Anomalous ARP",
                     "tier": "Tier 2",
                     "action": "Blocked",
-                    "confidence": f"{score*100:.1f}%"
+                    "confidence": f"{score*100:.1f}%",
+                    "detectedAtMs": detected_at_ms,
                 }
 
                 self.state.add_to_blacklist(
@@ -431,9 +448,33 @@ class TelemetryEngine(threading.Thread):
         # psutil's first cpu_percent() call returns 0.0 because it has no earlier
         # sample to compare against. Prime it so the first real reading counts.
         self._proc.cpu_percent(None)
+        # (time, blocked counter) samples spanning SCENARIO_WINDOW_SECONDS.
+        self._blocked_samples: deque = deque()
 
     def stop(self) -> None:
         self._stop.set()
+
+    def _classify_scenario(self) -> str:
+        """
+        Which of the paper's three traffic scenarios this agent is in right now.
+
+        Judged from the rate at which Tier 1 is dropping attack packets, averaged
+        over a short window so a single stray drop or a momentary gap in a flood
+        doesn't flip the label back and forth.
+        """
+        now = time.time()
+        with self.state._lock:
+            blocked = self.state.blocked
+        self._blocked_samples.append((now, blocked))
+        while len(self._blocked_samples) > 2 and (now - self._blocked_samples[0][0]) > SCENARIO_WINDOW_SECONDS:
+            self._blocked_samples.popleft()
+
+        t0, b0 = self._blocked_samples[0]
+        elapsed = now - t0
+        if elapsed <= 0 or blocked <= b0:
+            return "normal"
+        pps = (blocked - b0) / elapsed
+        return "flooding" if pps >= FLOOD_PPS_THRESHOLD else "poisoning"
 
     def _measure(self) -> tuple:
         """(cpu_percent, rss_mb, system_ram_percent) for this process."""
@@ -448,6 +489,7 @@ class TelemetryEngine(threading.Thread):
 
             is_protected = self.state.is_protected()
             cpu, ram_mb, ram_percent = self._measure()
+            scenario = self._classify_scenario()
 
             # Protection OFF used to report a fabricated 0 for both. The relay now
             # records these readings as research data, so send the real numbers and
@@ -457,6 +499,7 @@ class TelemetryEngine(threading.Thread):
                 self.state.cpu = cpu
                 self.state.memory = ram_percent
                 self.state.memory_mb = ram_mb
+                self.state.scenario = scenario
 
             self.bayanihan_client.send_telemetry(
                 cpu,
@@ -464,6 +507,7 @@ class TelemetryEngine(threading.Thread):
                 "PROTECTED" if is_protected else "UNPROTECTED",
                 ram_mb=ram_mb,
                 protected=is_protected,
+                scenario=scenario,
             )
 
 

@@ -43,3 +43,14 @@ PENDING_REPORTS_DB_PATH = os.environ.get(
 REPORT_QUEUE_MAX = int(os.environ.get("SENTINET_REPORT_QUEUE_MAX", "2000"))
 REPORT_ACK_TIMEOUT = float(os.environ.get("SENTINET_REPORT_ACK_TIMEOUT", "8.0"))
 REPORT_RETRY_INTERVAL = float(os.environ.get("SENTINET_REPORT_RETRY_INTERVAL", "2.0"))
+
+# Traffic-scenario labelling for the resource-consumption readings (SOP 1).
+# Chapter 3 evaluates CPU/RAM under three scenarios: normal traffic, targeted
+# ARP poisoning (~100 PPS) and sustained ARP flooding (~1,000 PPS). The agent
+# labels each reading with the one it is currently experiencing, judged from the
+# rate of attack packets Tier 1 is dropping, averaged over SCENARIO_WINDOW_SECONDS:
+# none -> "normal", below FLOOD_PPS_THRESHOLD -> "poisoning", at or above ->
+# "flooding". The default sits at the geometric midpoint of the paper's two
+# attack rates, since neither generator delivers its nominal rate exactly.
+FLOOD_PPS_THRESHOLD = float(os.environ.get("SENTINET_FLOOD_PPS_THRESHOLD", "300"))
+SCENARIO_WINDOW_SECONDS = float(os.environ.get("SENTINET_SCENARIO_WINDOW", "5.0"))
