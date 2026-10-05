@@ -201,6 +201,7 @@ class DBAgent(Base):
     cpu = Column(Float)              # percent, of the agent's SentiNet process
     ram = Column(Float)              # percent of system RAM — display only
     ram_mb = Column(Float)           # RSS in MB — the figure the paper specifies
+    ram_process_percent = Column(Float, nullable=True)  # that RSS as a share of the agent machine's RAM
     connected_since = Column(String)
     packets_processed = Column(Integer)
     last_seen = Column(Float, nullable=True)  # unix time of the last register/telemetry; see get_agents()
@@ -222,7 +223,7 @@ def _migrate_schema():
     # no ALTER — only genuinely new columns do.
     additions = {
         'ledger_entries': {'txid': 'VARCHAR', 'created_at': 'FLOAT'},
-        'agents': {'ram_mb': 'FLOAT', 'last_seen': 'FLOAT'},
+        'agents': {'ram_mb': 'FLOAT', 'last_seen': 'FLOAT', 'ram_process_percent': 'FLOAT'},
         'threats': {'detail': 'VARCHAR', 'client_event_id': 'VARCHAR'},
     }
 
@@ -296,12 +297,13 @@ def update_agent_telemetry(
     ram_mb: Optional[float] = None,
     protected: Optional[bool] = None,
     scenario: Optional[str] = None,
+    ram_process_percent: Optional[float] = None,
 ) -> None:
     """
     Store an agent's latest reading for the dashboard, and append a sample.
 
     `scenario` is the traffic scenario the agent says it is experiencing, which
-    labels the appended sample (see record_reading).
+    labels the appended sample (see record_reading) and the SOP 1 snapshot.
 
     cpu and ram are no longer truncated with int(): a t-test over percentages
     loses real precision if 12.9 is recorded as 12.
@@ -315,6 +317,8 @@ def update_agent_telemetry(
             db_agent.ram = float(ram)
             if ram_mb is not None:
                 db_agent.ram_mb = float(ram_mb)
+            if ram_process_percent is not None:
+                db_agent.ram_process_percent = float(ram_process_percent)
             if agent_state:
                 db_agent.state = agent_state
             db_agent.last_seen = time.time()
@@ -326,9 +330,7 @@ def update_agent_telemetry(
     # Only agents reporting MB give us a paper-compliant sample; an older agent
     # build sending percent only is recorded without one rather than guessed at.
     if node_name is not None:
-        if scenario:
-            with _record_lock:
-                _agent_scenarios[mac] = scenario
+        _take_sop_snapshot(mac, node_name, cpu, ram_mb, protected, scenario)
         record_reading(
             source='agent',
             node=node_name,
@@ -343,7 +345,7 @@ def update_agent_telemetry(
 
 def remove_agent(mac: str) -> None:
     with _record_lock:
-        _agent_scenarios.pop(mac, None)
+        _sop_agents.pop(mac, None)
     db = SessionLocal()
     db_agent = db.query(DBAgent).filter(DBAgent.mac == mac).first()
     if db_agent:
@@ -450,9 +452,117 @@ psutil.cpu_percent(None)
 _last_recorded: Dict[str, float] = {}
 _record_lock = threading.Lock()
 
-# The scenario each connected agent last reported, keyed by MAC — what the SOP
-# tab marks as live. In memory only: it describes right now, not the dataset.
-_agent_scenarios: Dict[str, str] = {}
+# The connected agents, keyed by MAC in the order they connected. The SOP tab
+# reports on one agent only — the first in this dict — since several would give
+# several competing sets of figures; when it disconnects the next in line takes
+# over. Only that agent accumulates anything: a CPU/RAM snapshot of its telemetry
+# every TELEMETRY_SAMPLE_INTERVAL per traffic scenario (SOP 1), and a count of
+# its detections (SOP 2). So an agent that takes over starts from fresh readings.
+# In memory only, so the tab also starts empty whenever the relay is restarted.
+_sop_agents: Dict[str, Dict[str, Any]] = {}
+
+
+def _sop_entry_locked(mac: str, name: str) -> Dict[str, Any]:
+    """This agent's entry, created at the back of the line if new. Hold _record_lock."""
+    entry = _sop_agents.get(mac)
+    if entry is None:
+        entry = _sop_agents[mac] = {
+            'evaluation': None,
+            'scenario': None,
+            'snapshots': {s: {'cpu': [], 'ram': []} for s in SOP_SCENARIOS},
+            'last_snapshot': {},
+            'detected': 0,
+            'blocked': 0,
+        }
+    entry['name'] = name
+    entry['last_seen'] = time.time()
+    return entry
+
+
+def _sop_head_locked() -> Optional[str]:
+    """
+    MAC of the agent the SOP tab reports on. Hold _record_lock.
+
+    An agent whose heartbeat has gone stale without a disconnect event is
+    dropped here, so a ghost cannot hold the front of the line.
+    """
+    cutoff = time.time() - AGENT_STALE_SECONDS
+    for mac in [m for m, e in _sop_agents.items() if e['last_seen'] < cutoff]:
+        del _sop_agents[mac]
+    return next(iter(_sop_agents), None)
+
+
+def register_sop_agent(mac: str, name: str, evaluation: Optional[Dict[str, Any]]) -> None:
+    """
+    Put a newly registered agent in line, with the held-out test set figures it
+    computed for its own model at start-up (SOP 2's confusion matrix).
+    """
+    with _record_lock:
+        entry = _sop_entry_locked(mac, name)
+        if isinstance(evaluation, dict):
+            entry['evaluation'] = evaluation
+
+
+def count_sop_detection(mac: Optional[str], action: Optional[str]) -> None:
+    """
+    Count one Tier-2 detection towards SOP 2's prevention rate (Chapter 3,
+    Equation 4), if it came from the agent the SOP tab is reporting on.
+    """
+    with _record_lock:
+        if not mac or mac != _sop_head_locked():
+            return
+        entry = _sop_agents[mac]
+        entry['detected'] += 1
+        if (action or '').lower() == 'blocked':
+            entry['blocked'] += 1
+
+
+def _take_sop_snapshot(
+    mac: str,
+    name: str,
+    cpu: float,
+    ram_mb: Optional[float],
+    protected: Optional[bool],
+    scenario: Optional[str],
+) -> None:
+    """Note an agent's current scenario, and keep one snapshot per interval."""
+    now = time.time()
+    label = _canonical_scenario(TELEMETRY_SCENARIO or scenario)
+    with _record_lock:
+        entry = _sop_entry_locked(mac, name)
+        entry['scenario'] = label
+        if mac != _sop_head_locked():
+            return
+
+        # Only an agent reporting MB gives a paper-compliant figure, and only
+        # while protection is on is it SentiNet's working footprint.
+        if label is None or ram_mb is None or protected is False:
+            return
+        # Per scenario, so an agent that comes under attack gets a snapshot for
+        # the new scenario straight away rather than up to a minute later.
+        last = entry['last_snapshot'].get(label)
+        if last is not None and (now - last) < TELEMETRY_SAMPLE_INTERVAL:
+            return
+        entry['last_snapshot'][label] = now
+        entry['snapshots'][label]['cpu'].append(float(cpu))
+        entry['snapshots'][label]['ram'].append(float(ram_mb))
+
+
+def _current_sop_agent() -> Optional[Dict[str, Any]]:
+    """A copy of what has accumulated for the agent the SOP tab reports on."""
+    with _record_lock:
+        mac = _sop_head_locked()
+        if mac is None:
+            return None
+        entry = _sop_agents[mac]
+        return {
+            'name': entry['name'],
+            'scenario': entry['scenario'],
+            'evaluation': entry['evaluation'],
+            'detected': entry['detected'],
+            'blocked': entry['blocked'],
+            'snapshots': {s: {k: list(v) for k, v in entry['snapshots'][s].items()} for s in SOP_SCENARIOS},
+        }
 
 
 def _should_record(key: str, now: float) -> bool:
@@ -719,38 +829,35 @@ def get_sop_summary() -> Dict[str, Any]:
     """
     The SentiNet half of each Statement-of-the-Problem answer, from recorded data.
 
-    SOP 1: mean CPU (%) and RAM (MB) per traffic scenario, over agent readings
-    taken while protection was on. Relay readings are excluded — they are
-    host-wide operational figures, not SentiNet's own footprint.
+    SOP 1: mean CPU (%) and RAM (MB) per traffic scenario, over the snapshots
+    taken of one agent's telemetry since it connected (see _current_sop_agent).
+
+    SOP 2: the confusion matrix and accuracy that agent computed on the held-out
+    test set, plus the prevention rate (Chapter 3, Equation 4) over the Tier-2
+    detections it has reported since it became the reporting agent.
 
     SOP 3: Time-to-Block per (detection, enforcing node) pair, with the latest
     trial's two timestamps and the mean and sample variance across all of them.
     """
     db = SessionLocal()
     try:
-        readings = db.query(DBTelemetryReading).filter(
-            DBTelemetryReading.source == 'agent',
-            DBTelemetryReading.system == 'sentinet',
-            DBTelemetryReading.protected == True,  # noqa: E712 — SQL comparison
-        ).all()
         detections = db.query(DBTtbDetection).order_by(DBTtbDetection.created_ts.asc()).all()
         enforcements = db.query(DBTtbEnforcement).order_by(DBTtbEnforcement.id.asc()).all()
     finally:
         db.close()
 
-    # ── SOP 1 ──
-    grouped: Dict[str, Dict[str, List[float]]] = {s: {'cpu': [], 'ram': []} for s in SOP_SCENARIOS}
-    for r in readings:
-        scenario = _canonical_scenario(r.scenario)
-        if scenario is None:
-            continue
-        if r.cpu_percent is not None:
-            grouped[scenario]['cpu'].append(r.cpu_percent)
-        if r.ram_mb:
-            grouped[scenario]['ram'].append(r.ram_mb)
+    sop_agent = _current_sop_agent()
 
-    with _record_lock:
-        live = sorted(set(_agent_scenarios.values()))
+    # ── SOP 2 ──
+    # A Tier-2 report is one detected attack; Tier-1/Tier-3 reports are repeat
+    # blocks of a MAC that was already detected, not new detections.
+    total_detected = sop_agent['detected'] if sop_agent else 0
+    blocked_attacks = sop_agent['blocked'] if sop_agent else 0
+
+    # ── SOP 1 ──
+    grouped: Dict[str, Dict[str, List[float]]] = (
+        sop_agent['snapshots'] if sop_agent else {s: {'cpu': [], 'ram': []} for s in SOP_SCENARIOS}
+    )
 
     efficiency = {}
     for scenario in SOP_SCENARIOS:
@@ -762,7 +869,7 @@ def get_sop_summary() -> Dict[str, Any]:
             'varianceCpu': cpu['variance'],
             'meanRamMb': ram['mean'],
             'varianceRamMb': ram['variance'],
-            'live': scenario in live,
+            'live': bool(sop_agent) and sop_agent['scenario'] == scenario,
         }
 
     # ── SOP 3 ──
@@ -804,8 +911,15 @@ def get_sop_summary() -> Dict[str, Any]:
 
     return {
         'efficiency': {
+            'agent': sop_agent['name'] if sop_agent else None,
             'scenarios': efficiency,
             'sampleIntervalSeconds': TELEMETRY_SAMPLE_INTERVAL,
+        },
+        'detection': {
+            'evaluation': sop_agent['evaluation'] if sop_agent else None,
+            'blockedAttacks': blocked_attacks,
+            'totalDetectedAttacks': total_detected,
+            'preventionRate': (blocked_attacks / total_detected * 100) if total_detected else None,
         },
         'timeToBlock': {
             'latest': latest,
@@ -1023,6 +1137,7 @@ def get_agents() -> List[Dict[str, Any]]:
             'cpu': a.cpu,
             'ram': a.ram,
             'ramMb': a.ram_mb,
+            'ramProcessPercent': a.ram_process_percent,
             'connectedSince': a.connected_since,
             'packetsProcessed': a.packets_processed
         } for a in db_agents

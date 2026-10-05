@@ -381,7 +381,7 @@ class BayanihanClient:
 
     def send_telemetry(self, cpu: float, ram: float, state: str = None,
                        ram_mb: float = None, protected: bool = None,
-                       scenario: str = None):
+                       scenario: str = None, ram_process_percent: float = None):
         """
         Report resource consumption to the relay.
 
@@ -389,6 +389,8 @@ class BayanihanClient:
         process's RSS in megabytes, which is what Chapter 3 specifies and what the
         relay records for analysis. scenario is the traffic scenario this agent is
         currently experiencing, which the relay stores alongside the reading.
+        ram_process_percent is that same RSS as a share of this machine's RAM,
+        for the bar next to the agent in the admin dashboard.
         """
         if self.connected and self.agent_info:
             try:
@@ -405,6 +407,8 @@ class BayanihanClient:
                     payload["state"] = state
                 if scenario:
                     payload["scenario"] = scenario
+                if ram_process_percent is not None:
+                    payload["ramProcessPercent"] = ram_process_percent
                 self.sio.emit("telemetry_report", payload)
             except Exception as e:
                 pass

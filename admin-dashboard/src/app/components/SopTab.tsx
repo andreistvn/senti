@@ -55,8 +55,19 @@ function clockMs(ms: number | null | undefined) {
 function buildCards(summary: SopSummary | null): SopCard[] {
   const scenarios = summary?.efficiency.scenarios;
   const readings = scenarios ? SCENARIOS.reduce((sum, s) => sum + scenarios[s.key].n, 0) : 0;
+  const detection = summary?.detection;
+  const evaluation = detection?.evaluation;
   const ttb = summary?.timeToBlock;
   const trial = ttb?.latest;
+
+  const count = (value: number | null | undefined) => (value == null ? null : String(value));
+  const detectionParts: string[] = [];
+  if (evaluation) {
+    detectionParts.push(`Held-out test set · n = ${evaluation.n} windows · threshold ${evaluation.threshold.toFixed(2)}`);
+  }
+  if (detection && detection.totalDetectedAttacks > 0) {
+    detectionParts.push("prevention from this agent's live detections");
+  }
 
   let ttbFooter = AWAITING;
   if (trial && ttb) {
@@ -90,7 +101,7 @@ function buildCards(summary: SopSummary | null): SopCard[] {
         };
       }),
       footer: readings > 0 && summary
-        ? `${readings} agent readings · one per ${summary.efficiency.sampleIntervalSeconds}s per scenario`
+        ? `${summary.efficiency.agent ?? 'Agent'} · ${readings} snapshots · one per ${summary.efficiency.sampleIntervalSeconds}s per scenario`
         : AWAITING,
     },
     {
@@ -99,20 +110,20 @@ function buildCards(summary: SopSummary | null): SopCard[] {
       groups: [{
         rows: [
           [
-            { label: 'True Positives' },
-            { label: 'False Positives' },
-            { label: 'True Negatives' },
-            { label: 'False Negatives' },
+            { label: 'True Positives', value: count(evaluation?.truePositives) },
+            { label: 'False Positives', value: count(evaluation?.falsePositives) },
+            { label: 'True Negatives', value: count(evaluation?.trueNegatives) },
+            { label: 'False Negatives', value: count(evaluation?.falseNegatives) },
           ],
-          [{ label: 'Accuracy', unit: '%' }],
+          [{ label: 'Accuracy', unit: '%', value: fixed(evaluation?.accuracy, 2) }],
           [
-            { label: 'Blocked Attacks' },
-            { label: 'Total Detected Attacks' },
-            { label: 'Prevention Rate', unit: '%' },
+            { label: 'Blocked Attacks', value: summary?.efficiency.agent ? count(detection?.blockedAttacks) : null },
+            { label: 'Total Detected Attacks', value: summary?.efficiency.agent ? count(detection?.totalDetectedAttacks) : null },
+            { label: 'Prevention Rate', unit: '%', value: fixed(detection?.preventionRate, 2) },
           ],
         ],
       }],
-      footer: AWAITING,
+      footer: detectionParts.length > 0 ? detectionParts.join(' · ') : AWAITING,
     },
     {
       key: 'SOP 3',

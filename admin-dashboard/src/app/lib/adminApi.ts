@@ -13,7 +13,9 @@ export interface AdminAgent {
   state: 'PROTECTED' | 'DETECTING' | 'SYNCING' | 'UNPROTECTED';
   syncProgress: number;
   cpu: number;
-  ram: number;
+  ram: number;                        // percent of the agent machine's RAM in use, host-wide
+  ramMb?: number | null;              // the SentiNet agent process's own RAM, MB
+  ramProcessPercent?: number | null;  // that as a share of the agent machine's RAM
   connectedSince: string;
   packetsProcessed: number;
 }
@@ -254,6 +256,19 @@ export interface SopEfficiencyScenario {
   live: boolean;
 }
 
+// Computed by the agent at start-up, from the held-out test set.
+export interface SopEvaluation {
+  threshold: number;
+  n: number;
+  truePositives: number;
+  falsePositives: number;
+  trueNegatives: number;
+  falseNegatives: number;
+  accuracy: number;
+  detectionRate: number;
+  falsePositiveRate: number;
+}
+
 export interface SopTtbTrial {
   attackerMac: string;
   detectedBy: string;
@@ -266,8 +281,15 @@ export interface SopTtbTrial {
 
 export interface SopSummary {
   efficiency: {
+    agent: string | null;  // the one agent these figures come from
     scenarios: Record<SopScenario, SopEfficiencyScenario>;
     sampleIntervalSeconds: number;
+  };
+  detection: {
+    evaluation: SopEvaluation | null;
+    blockedAttacks: number;
+    totalDetectedAttacks: number;
+    preventionRate: number | null;
   };
   timeToBlock: {
     latest: SopTtbTrial | null;

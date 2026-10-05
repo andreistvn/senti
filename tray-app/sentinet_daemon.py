@@ -477,18 +477,20 @@ class TelemetryEngine(threading.Thread):
         return "flooding" if pps >= FLOOD_PPS_THRESHOLD else "poisoning"
 
     def _measure(self) -> tuple:
-        """(cpu_percent, rss_mb, system_ram_percent) for this process."""
+        """(cpu_percent, rss_mb, system_ram_percent, process_ram_percent) for this process."""
         with self._proc.oneshot():
             cpu = self._proc.cpu_percent(None)
             rss_mb = self._proc.memory_info().rss / (1024 * 1024)
-        return round(cpu, 2), round(rss_mb, 2), round(psutil.virtual_memory().percent, 2)
+            process_percent = self._proc.memory_percent()
+        return (round(cpu, 2), round(rss_mb, 2),
+                round(psutil.virtual_memory().percent, 2), round(process_percent, 2))
 
     def run(self) -> None:
         while not self._stop.is_set():
             time.sleep(SIM_TICK_SECONDS)
 
             is_protected = self.state.is_protected()
-            cpu, ram_mb, ram_percent = self._measure()
+            cpu, ram_mb, ram_percent, ram_process_percent = self._measure()
             scenario = self._classify_scenario()
 
             # Protection OFF used to report a fabricated 0 for both. The relay now
@@ -508,6 +510,7 @@ class TelemetryEngine(threading.Thread):
                 ram_mb=ram_mb,
                 protected=is_protected,
                 scenario=scenario,
+                ram_process_percent=ram_process_percent,
             )
 
 
@@ -545,6 +548,12 @@ class SentiNetDaemon:
         self.state.ip = ip_addr
         self.state.mac = mac_addr
         self.ml_engine = MLEngine()
+        # SOP 2's confusion matrix, computed here and carried to the relay in
+        # register_agent. Milliseconds of work, once per start-up.
+        evaluation = self.ml_engine.evaluate()
+        if evaluation:
+            agent_info["evaluation"] = evaluation
+            print(f"[MLEngine] Held-out test set: accuracy {evaluation['accuracy']:.2f}% over {evaluation['n']} windows")
         self.bayanihan_client = BayanihanClient(
             relay_url=RELAY_URL,
             on_blacklist_update=self.state.add_to_blacklist,
@@ -625,7 +634,13 @@ class SentiNetDaemon:
             self.capture.stop()
             self.telemetry.stop()
             self.ipc.stop()
-            print("[SentiNet Daemon] Stopped cleanly.")
+            self.bayanihan_client.set_enabled(False)
+            print("[SentiNet Daemon] Stopped cleanly.", flush=True)
+            # Exit for certain. SIGTERM is handled above, so if interpreter
+            # shutdown then stalls on a background thread the process can no
+            # longer be terminated short of SIGKILL — and a daemon that lingers
+            # stays connected to the relay as a ghost agent.
+            os._exit(0)
 
 
 if __name__ == "__main__":

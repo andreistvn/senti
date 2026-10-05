@@ -303,8 +303,8 @@ async def telemetry_readings(
 @app.get('/sop/summary')
 async def sop_summary(sentinet_admin_session: Optional[str] = Cookie(None)):
     """
-    What the dashboard's SOP tab shows: mean CPU/RAM per traffic scenario
-    (SOP 1) and Time-to-Block (SOP 3), computed from the recorded data.
+    What the dashboard's SOP tab shows: one agent's mean CPU/RAM per traffic
+    scenario (SOP 1), detection performance (SOP 2) and Time-to-Block (SOP 3).
     """
     if not sentinet_admin_session:
         raise HTTPException(status_code=401, detail='Not authenticated')
@@ -457,7 +457,8 @@ async def disconnect(sid):
     mac_to_sid.pop(mac, None)
     state.remove_agent(mac)
 
-async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str], reporter_name: str) -> Dict[str, Any]:
+async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str], reporter_name: str,
+                                reporter_mac: Optional[str] = None) -> Dict[str, Any]:
     """
     Record one attack report and fan it out to the rest of the mesh.
 
@@ -516,6 +517,8 @@ async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str
     # no detection time and are left out — they are not first detections.
     detected_at_ms = data.get("detectedAtMs")
     ttb_event_id = None
+    if tier == "Tier 2":
+        state.count_sop_detection(reporter_mac, action)
     if tier == "Tier 2" and client_event_id and isinstance(detected_at_ms, (int, float)):
         state.record_ttb_detection(
             event_id=client_event_id,
@@ -554,6 +557,8 @@ async def register_agent(sid, data):
         sid_to_mac[sid] = mac
         mac_to_sid[mac] = sid
     state.upsert_agent(data)
+    if mac:
+        state.register_sop_agent(mac, data.get("name") or mac, data.get("evaluation"))
 
     # Replay the network-wide blacklist to this agent. Without this an agent that
     # joins (or reconnects) after a threat was reported starts with an empty
@@ -574,7 +579,7 @@ async def register_agent(sid, data):
     recent_events = data.get("recentEvents") or []
     backfilled = 0
     for event in recent_events:
-        result = await _ingest_attack_report(event, reporter_sid=None, reporter_name=reporter)
+        result = await _ingest_attack_report(event, reporter_sid=None, reporter_name=reporter, reporter_mac=mac)
         if result.get("status") == "ok" and not result.get("duplicate"):
             backfilled += 1
     if backfilled:
@@ -589,10 +594,11 @@ async def telemetry_report(sid, data):
     protected = data.get("protected")
     agent_state = data.get("state")
     scenario = data.get("scenario")          # normal | poisoning | flooding, as the agent sees it
+    ram_process_percent = data.get("ramProcessPercent")  # that RSS as a share of the agent's RAM
     if mac:
         state.update_agent_telemetry(
             mac, cpu, ram, agent_state, ram_mb=ram_mb, protected=protected,
-            scenario=scenario,
+            scenario=scenario, ram_process_percent=ram_process_percent,
         )
 
 @sio.event
@@ -635,7 +641,8 @@ async def attack_report(sid, data):
     """
     print(f"[WebSocket] Received attack report from {sid}: {data}")
     reporter = data.get("name") or sid_to_mac.get(sid) or "unknown"
-    return await _ingest_attack_report(data, reporter_sid=sid, reporter_name=reporter)
+    return await _ingest_attack_report(data, reporter_sid=sid, reporter_name=reporter,
+                                       reporter_mac=sid_to_mac.get(sid))
 
 
 if __name__ == '__main__':
