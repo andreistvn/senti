@@ -81,7 +81,10 @@ function buildCards(summary: SopSummary | null): SopCard[] {
       parts.push(`mean ${fixed(ttb.meanTtbMs, 1)} ms`);
       if (ttb.varianceTtbMs != null) parts.push(`variance ${fixed(ttb.varianceTtbMs, 1)}`);
     }
-    if (trial.relayTtbMs != null) parts.push(`relay clock ${fixed(trial.relayTtbMs, 0)} ms`);
+    if (trial.ttbMs != null && trial.agentClockTtbMs != null) {
+      const skew = Math.abs(trial.agentClockTtbMs - trial.ttbMs);
+      if (skew >= 50) parts.push(`agent clocks ${fixed(skew, 0)} ms apart, corrected`);
+    }
     ttbFooter = parts.join(' · ');
   }
 

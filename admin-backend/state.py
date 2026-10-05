@@ -143,6 +143,7 @@ class DBTtbDetection(Base):
     detected_by = Column(String)                  # detecting agent's name (or MAC)
     t_detected_ms = Column(Float)                 # agent clock, epoch ms
     relay_received_ms = Column(Float)             # relay clock, epoch ms
+    agent_delay_ms = Column(Float, nullable=True) # detection -> hand-off, on the agent's clock
     created_ts = Column(Float, index=True)
 
 
@@ -160,6 +161,7 @@ class DBTtbEnforcement(Base):
     enforced_by_mac = Column(String, index=True)
     t_enforced_ms = Column(Float)                 # agent clock, epoch ms
     relay_acked_ms = Column(Float)                # relay clock, epoch ms
+    agent_delay_ms = Column(Float, nullable=True) # enforcement -> hand-off, on the agent's clock
 
 
 class DBBlacklistEntry(Base):
@@ -225,6 +227,8 @@ def _migrate_schema():
         'ledger_entries': {'txid': 'VARCHAR', 'created_at': 'FLOAT'},
         'agents': {'ram_mb': 'FLOAT', 'last_seen': 'FLOAT', 'ram_process_percent': 'FLOAT'},
         'threats': {'detail': 'VARCHAR', 'client_event_id': 'VARCHAR'},
+        'ttb_detections': {'agent_delay_ms': 'FLOAT'},
+        'ttb_enforcements': {'agent_delay_ms': 'FLOAT'},
     }
 
     with engine.begin() as conn:
@@ -740,6 +744,7 @@ def record_ttb_detection(
     detected_by: str,
     t_detected_ms: float,
     relay_received_ms: float,
+    agent_delay_ms: Optional[float] = None,
 ) -> None:
     """Record t_detected for a first detection. Idempotent on the event id."""
     db = SessionLocal()
@@ -752,6 +757,7 @@ def record_ttb_detection(
             detected_by=detected_by,
             t_detected_ms=float(t_detected_ms),
             relay_received_ms=float(relay_received_ms),
+            agent_delay_ms=agent_delay_ms,
             created_ts=time.time(),
         ))
         db.commit()
@@ -765,6 +771,7 @@ def record_ttb_enforcement(
     enforced_by_mac: str,
     t_enforced_ms: float,
     relay_acked_ms: float,
+    agent_delay_ms: Optional[float] = None,
 ) -> bool:
     """
     Record t_enforced for one node. Returns False if the detection is unknown or
@@ -786,6 +793,7 @@ def record_ttb_enforcement(
             enforced_by_mac=enforced_by_mac,
             t_enforced_ms=float(t_enforced_ms),
             relay_acked_ms=float(relay_acked_ms),
+            agent_delay_ms=agent_delay_ms,
         ))
         db.commit()
         return True
@@ -879,18 +887,26 @@ def get_sop_summary() -> Dict[str, Any]:
         d = by_event.get(e.event_id)
         if d is None:
             continue
+        # t_detected and t_enforced are stamped by two different machines, and
+        # their clocks are never exactly in sync — a few hundred milliseconds of
+        # drift is enough to make the raw difference negative. So both are
+        # placed on the relay's clock first: the moment the relay heard from
+        # each agent, minus how long that agent had held the event (a duration
+        # on its own clock, which drift does not affect). What remains
+        # unaccounted for is B's network trip back to the relay, a millisecond
+        # or so on a LAN, which makes the figure very slightly high.
+        t_detected = d.relay_received_ms - (d.agent_delay_ms or 0.0)
+        t_enforced = e.relay_acked_ms - (e.agent_delay_ms or 0.0)
         trials.append({
             'attackerMac': d.attacker_mac,
             'detectedBy': d.detected_by,
             'enforcedBy': e.enforced_by,
-            'tDetectedMs': d.t_detected_ms,
-            'tEnforcedMs': e.t_enforced_ms,
-            # The paper's formula, on the two agents' own clocks.
-            'ttbMs': e.t_enforced_ms - d.t_detected_ms,
-            # The same interval on the relay's clock alone: report received to
-            # enforcement acknowledged. Immune to clock skew between agents, but
-            # it leaves out A's detection-to-send time and adds B's ack trip.
-            'relayTtbMs': e.relay_acked_ms - d.relay_received_ms,
+            'tDetectedMs': t_detected,
+            'tEnforcedMs': t_enforced,
+            'ttbMs': t_enforced - t_detected,
+            # The raw difference of the two agents' own clocks, for reference:
+            # how far it sits from ttbMs is how far apart those clocks are.
+            'agentClockTtbMs': e.t_enforced_ms - d.t_detected_ms,
         })
 
     latest = trials[-1] if trials else None
@@ -901,10 +917,10 @@ def get_sop_summary() -> Dict[str, Any]:
             'attackerMac': d.attacker_mac,
             'detectedBy': d.detected_by,
             'enforcedBy': None,
-            'tDetectedMs': d.t_detected_ms,
+            'tDetectedMs': d.relay_received_ms - (d.agent_delay_ms or 0.0),
             'tEnforcedMs': None,
             'ttbMs': None,
-            'relayTtbMs': None,
+            'agentClockTtbMs': None,
         }
 
     ttb_stats = _mean_and_variance([t['ttbMs'] for t in trials])

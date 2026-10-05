@@ -38,6 +38,7 @@ from config import (
     RELAY_URL,
     TIER1_REPORT_COOLDOWN_SECONDS,
     FLOOD_PPS_THRESHOLD,
+    POISON_PPS_THRESHOLD,
     SCENARIO_WINDOW_SECONDS,
 )
 from ipc_protocol import (
@@ -538,6 +539,8 @@ class TelemetryEngine(threading.Thread):
         if elapsed <= 0 or blocked <= b0:
             return "normal"
         pps = (blocked - b0) / elapsed
+        if pps < POISON_PPS_THRESHOLD:
+            return "normal"
         return "flooding" if pps >= FLOOD_PPS_THRESHOLD else "poisoning"
 
     def _measure(self) -> tuple:
