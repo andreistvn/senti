@@ -173,6 +173,7 @@ class BayanihanClient:
             self.connected = True
             if self.agent_info:
                 payload = dict(self.agent_info)
+                payload["sentAtMs"] = int(time.time() * 1000)
                 if self.recent_events_provider:
                     try:
                         payload["recentEvents"] = self.recent_events_provider()
@@ -215,6 +216,7 @@ class BayanihanClient:
                             "agentMac": self.agent_info.get("mac"),
                             "agentName": self.agent_info.get("name"),
                             "enforcedAtMs": enforced_at_ms,
+                            "sentAtMs": int(time.time() * 1000),
                         })
                     except Exception as exc:
                         print(f"[BayanihanClient] Could not report enforcement of {mac}: {exc}")
@@ -349,7 +351,13 @@ class BayanihanClient:
                 return
 
             try:
-                ack = self.sio.call("attack_report", item["event"], timeout=REPORT_ACK_TIMEOUT)
+                # sentAtMs is this clock's time at hand-off. With detectedAtMs
+                # it tells the relay how long the report waited here, which lets
+                # it place the detection on its own clock — two agents' clocks
+                # are never exactly in sync, so their timestamps cannot simply
+                # be subtracted from each other.
+                report = dict(item["event"], sentAtMs=int(time.time() * 1000))
+                ack = self.sio.call("attack_report", report, timeout=REPORT_ACK_TIMEOUT)
             except Exception as exc:
                 item["attempts"] += 1
                 self._store.bump_attempts(client_event_id)

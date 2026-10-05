@@ -457,6 +457,19 @@ async def disconnect(sid):
     mac_to_sid.pop(mac, None)
     state.remove_agent(mac)
 
+def _agent_delay_ms(sent_at_ms: Any, stamped_at_ms: Any) -> Optional[float]:
+    """
+    How long an agent held a timestamped event before sending it, on its own clock.
+
+    Both values come from the same machine, so their difference is unaffected by
+    that machine's clock being ahead of or behind the relay's. None if the agent
+    did not send a hand-off time (an older agent build).
+    """
+    if not isinstance(sent_at_ms, (int, float)) or not isinstance(stamped_at_ms, (int, float)):
+        return None
+    return max(0.0, float(sent_at_ms) - float(stamped_at_ms))
+
+
 async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str], reporter_name: str,
                                 reporter_mac: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -526,6 +539,7 @@ async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str
             detected_by=state.agent_name_for(reporter_name) or reporter_name,
             t_detected_ms=detected_at_ms,
             relay_received_ms=relay_received_ms,
+            agent_delay_ms=_agent_delay_ms(data.get("sentAtMs"), detected_at_ms),
         )
         ttb_event_id = client_event_id
 
@@ -579,6 +593,9 @@ async def register_agent(sid, data):
     recent_events = data.get("recentEvents") or []
     backfilled = 0
     for event in recent_events:
+        # These were stamped earlier and are only now being handed over.
+        if isinstance(event, dict) and "sentAtMs" not in event and data.get("sentAtMs") is not None:
+            event = dict(event, sentAtMs=data.get("sentAtMs"))
         result = await _ingest_attack_report(event, reporter_sid=None, reporter_name=reporter, reporter_mac=mac)
         if result.get("status") == "ok" and not result.get("duplicate"):
             backfilled += 1
@@ -625,6 +642,7 @@ async def blacklist_enforced(sid, data):
         enforced_by_mac=agent_mac,
         t_enforced_ms=enforced_at_ms,
         relay_acked_ms=relay_acked_ms,
+        agent_delay_ms=_agent_delay_ms(data.get("sentAtMs"), enforced_at_ms),
     )
     if recorded:
         print(f"[WebSocket] {data.get('agentName') or agent_mac} enforced block of {data.get('mac')}")

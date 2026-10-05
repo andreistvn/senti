@@ -273,10 +273,12 @@ export interface SopTtbTrial {
   attackerMac: string;
   detectedBy: string;
   enforcedBy: string | null;
+  // Both timestamps are on the relay's clock, so they can be compared.
   tDetectedMs: number;
   tEnforcedMs: number | null;
   ttbMs: number | null;
-  relayTtbMs: number | null;
+  // The two agents' own clocks subtracted directly — off by however far apart they are.
+  agentClockTtbMs: number | null;
 }
 
 export interface SopSummary {
