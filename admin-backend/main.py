@@ -22,7 +22,7 @@ Implements the contract endpoints for the admin dashboard:
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Cookie
+from fastapi import FastAPI, HTTPException, Cookie, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -169,7 +169,7 @@ async def logout(sentinet_admin_session: Optional[str] = Cookie(None)):
     if sentinet_admin_session:
         state.destroy_session(sentinet_admin_session)
     
-    response = JSONResponse(status_code=204)
+    response = Response(status_code=204)
     response.delete_cookie('sentinet_admin_session')
     return response
 
