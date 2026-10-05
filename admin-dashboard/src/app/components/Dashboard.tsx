@@ -19,6 +19,8 @@ interface Agent {
   syncProgress: number;
   cpu: number;
   ram: number;
+  ramMb?: number | null;
+  ramProcessPercent?: number | null;
   connectedSince: string;
   packetsProcessed: number;
 }
@@ -220,7 +222,8 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     ip:               a.ip,
     mac:              a.mac,
     cpu:              a.cpu,
-    ram:              a.ram,
+    ramMb:            a.ramMb ?? null,
+    ramProcessPercent: a.ramProcessPercent ?? 0,
     connectedSince:   a.connectedSince,
     packetsProcessed: a.packetsProcessed,
     state:            a.state,
@@ -326,10 +329,10 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                           </div>
                           <div className="flex justify-between text-[9px] font-bold uppercase">
                             <span>RAM</span>
-                            <span className="font-['JetBrains_Mono',_monospace] text-[#0F172A]">{agent.ram}%</span>
+                            <span className="font-['JetBrains_Mono',_monospace] text-[#0F172A]">{agent.ramMb != null ? `${agent.ramMb.toFixed(1)} MB` : '—'}</span>
                           </div>
                           <div className="h-1.5 border border-[#e2e8f0] bg-white">
-                            <div className="h-full bg-[#16A34A] transition-all duration-500" style={{ width: `${agent.ram}%` }} />
+                            <div className="h-full bg-[#16A34A] transition-all duration-500" style={{ width: `${agent.ramProcessPercent ?? 0}%` }} />
                           </div>
                         </div>
                       )}

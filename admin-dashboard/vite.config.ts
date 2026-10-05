@@ -35,6 +35,7 @@ const API_PATHS = [
   '/health',
   '/ledger',
   '/policy',
+  '/sop',
   '/telemetry',
   '/threats',
 ]

@@ -14,7 +14,8 @@ export interface AgentHealth {
   ip: string;
   mac: string;
   cpu: number;
-  ram: number;
+  ramMb: number | null;          // the agent process's own RAM, MB
+  ramProcessPercent: number;     // that as a share of the agent machine's RAM
   connectedSince: string;
   packetsProcessed: number;
   state: string;
@@ -173,7 +174,7 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
           <div className="flex-1 overflow-auto p-4 flex flex-col gap-3">
             {agents.map(agent => {
               const cpuHigh = agent.cpu > 70;
-              const ramHigh = agent.ram > 75;
+              const ramHigh = agent.ramProcessPercent > 75;
               return (
                 <div key={agent.id} className={`border p-4 ${cpuHigh ? 'border-[#DC2626]' : 'border-[#E2E8F0]'} bg-[#F8FAFC]`}>
                   <div className="flex justify-between items-start mb-3">
@@ -198,10 +199,10 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
                     <div>
                       <div className="flex justify-between text-[9px] font-bold uppercase mb-1">
                         <span>RAM</span>
-                        <span className={`font-['JetBrains_Mono',_monospace] ${ramHigh ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>{agent.ram}%</span>
+                        <span className={`font-['JetBrains_Mono',_monospace] ${ramHigh ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>{agent.ramMb != null ? `${agent.ramMb.toFixed(1)} MB` : '—'}</span>
                       </div>
                       <div className="h-2 border border-[#e2e8f0] bg-white">
-                        <div className={`h-full transition-all duration-500 ${ramHigh ? 'bg-[#DC2626]' : 'bg-[#16A34A]'}`} style={{ width: `${agent.ram}%` }} />
+                        <div className={`h-full transition-all duration-500 ${ramHigh ? 'bg-[#DC2626]' : 'bg-[#16A34A]'}`} style={{ width: `${agent.ramProcessPercent}%` }} />
                       </div>
                     </div>
                   </div>
