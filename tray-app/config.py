@@ -46,11 +46,21 @@ REPORT_RETRY_INTERVAL = float(os.environ.get("SENTINET_REPORT_RETRY_INTERVAL", "
 
 # Traffic-scenario labelling for the resource-consumption readings (SOP 1).
 # Chapter 3 evaluates CPU/RAM under three scenarios: normal traffic, targeted
-# ARP poisoning (~100 PPS) and sustained ARP flooding (~1,000 PPS). The agent
-# labels each reading with the one it is currently experiencing, judged from the
-# rate of attack packets Tier 1 is dropping, averaged over SCENARIO_WINDOW_SECONDS:
-# none -> "normal", below FLOOD_PPS_THRESHOLD -> "poisoning", at or above ->
-# "flooding". The default sits at the geometric midpoint of the paper's two
-# attack rates, since neither generator delivers its nominal rate exactly.
-FLOOD_PPS_THRESHOLD = float(os.environ.get("SENTINET_FLOOD_PPS_THRESHOLD", "300"))
+# ARP poisoning (nominally 100 PPS) and sustained ARP flooding (nominally 1,000
+# PPS). The agent labels each reading with the one it is currently experiencing,
+# judged from the rate of attack packets Tier 1 is dropping, averaged over
+# SCENARIO_WINDOW_SECONDS: below POISON_PPS_THRESHOLD -> "normal", below
+# FLOOD_PPS_THRESHOLD -> "poisoning", at or above -> "flooding".
+#
+# The two cut-offs come from what the victim actually received in the study's
+# own dataset (model-training/train.csv + test.csv, arp_reply_rate per 5-second
+# window), which is well below the nominal rates for poisoning:
+#     normal      at most 2 replies/s
+#     poisoning   13.8 - 24.8 /s   (median 22;  1,200 windows)
+#     flooding    421 - 1,001 /s   (median 885; 1,323 windows)
+# Each sits at the geometric midpoint of the gap it divides. The lower one also
+# keeps a still-blacklisted device's stray ordinary ARP frames (a packet or two
+# per second, after its attack has ended) from being read as an attack.
+POISON_PPS_THRESHOLD = float(os.environ.get("SENTINET_POISON_PPS_THRESHOLD", "5"))
+FLOOD_PPS_THRESHOLD = float(os.environ.get("SENTINET_FLOOD_PPS_THRESHOLD", "100"))
 SCENARIO_WINDOW_SECONDS = float(os.environ.get("SENTINET_SCENARIO_WINDOW", "5.0"))
