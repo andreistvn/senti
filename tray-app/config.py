@@ -24,6 +24,12 @@ AGENT_VERSION = "v2.4.9"
 # How often (seconds) the simulation engine ticks while protection is ON.
 SIM_TICK_SECONDS = float(os.environ.get("SENTINET_SIM_TICK", "1.0"))
 
+# Quiet gap (seconds) after which a Tier-1 block on an already-blacklisted MAC
+# is logged again. A sustained flood keeps resetting this timer so it stays at
+# one log line, but a genuinely new burst — e.g. re-running the attack generator
+# — reports afresh. Lower it to see new records sooner while testing.
+TIER1_REPORT_COOLDOWN_SECONDS = float(os.environ.get("SENTINET_TIER1_COOLDOWN", "30.0"))
+
 # IPC: Unix domain socket path (macOS/Linux) for daemon ↔ tray communication.
 IPC_SOCKET_PATH = os.environ.get("SENTINET_IPC_SOCKET", "/tmp/sentinet.sock")
 

@@ -36,6 +36,7 @@ from config import (
     AGENT_VERSION,
     SIM_TICK_SECONDS,
     RELAY_URL,
+    TIER1_REPORT_COOLDOWN_SECONDS,
     FLOOD_PPS_THRESHOLD,
     SCENARIO_WINDOW_SECONDS,
 )
@@ -143,10 +144,10 @@ class DaemonState:
         "relay", proving the intelligence came from another node. `reported_by`
         names which agent originally reported it, for relay-origin entries.
 
-        `tier1Reported` tracks whether a *subsequent* Tier-1 hit on this MAC has
-        already been surfaced once (see CaptureEngine._process_packet) — without
-        it, every dropped packet from an already-blacklisted MAC would otherwise
-        re-report, which is exactly the flood Tier 1 exists to avoid.
+        `lastSeenAt` / `lastReportedAt` are monotonic timestamps of the most
+        recent Tier-1 hit and the most recent logged report for this MAC;
+        `classify_tier1_hit` uses them to decide when a block is worth logging
+        again, and whether it reads as a new burst or an ongoing one.
         """
         with self._lock:
             is_new = mac not in self.blacklist
@@ -159,23 +160,75 @@ class DaemonState:
                     "attackType": attack_type,
                     "confidence": confidence,
                     "reportedBy": reported_by,
-                    "tier1Reported": False,
+                    "lastSeenAt": None,
+                    "lastReportedAt": None,
                 }
             return is_new
 
-    def mark_blacklist_reported(self, mac: str) -> bool:
+    def classify_tier1_hit(self, mac: str) -> Optional[str]:
         """
-        Mark a MAC's repeat/Bayanihan block as surfaced. Returns True only the
-        first time this is called for a given MAC, False on every call after —
-        that's what turns a sustained flood from one already-known MAC into a
-        single log line instead of one per dropped packet.
+        Record a Tier-1 hit and decide whether it is worth logging.
+
+        Returns None to stay silent, "new" for the first block of a fresh burst,
+        or "ongoing" for the periodic reminder that an attack is still being
+        blocked. Both are rate-limited to one log per
+        TIER1_REPORT_COOLDOWN_SECONDS, measured from the last *report* — so a
+        flood dropping a thousand packets a second produces a readable trickle
+        (one line per window) instead of one line per packet, while still
+        proving protection is actively working for as long as it lasts.
+
+        A gap of at least one window since the previous packet is what marks a
+        hit as "new": nothing arrived for long enough that this is a fresh burst
+        rather than a continuation of one already being reported.
         """
+        now = time.monotonic()
         with self._lock:
             meta = self.blacklist_meta.get(mac)
-            if meta is None or meta.get("tier1Reported"):
-                return False
-            meta["tier1Reported"] = True
-            return True
+            if meta is None:
+                return None
+
+            last_seen = meta.get("lastSeenAt")
+            last_reported = meta.get("lastReportedAt")
+            meta["lastSeenAt"] = now
+
+            is_new_burst = (
+                last_seen is None
+                or (now - last_seen) >= TIER1_REPORT_COOLDOWN_SECONDS
+            )
+
+            # Still inside the window since the last log: stay quiet.
+            if last_reported is not None and (now - last_reported) < TIER1_REPORT_COOLDOWN_SECONDS:
+                return None
+
+            meta["lastReportedAt"] = now
+            return "new" if is_new_burst else "ongoing"
+
+    def rearm_tier1_reporting(self) -> int:
+        """
+        Forget the timers on every blacklist entry, so the next packet from any
+        of them logs immediately instead of waiting out the cooldown.
+
+        This is the fast manual path to fresh Tier-1/Tier-3 evidence when you
+        can't wait for the cooldown: protection OFF then ON re-arms everything.
+        The entries themselves are deliberately left in place — the MAC stays
+        blocked throughout, and intelligence learned from peer agents over
+        Bayanihan is not discarded.
+
+        Callers must NOT already hold self._lock (threading.Lock is not
+        reentrant); set_protected re-arms inline for that reason.
+        """
+        with self._lock:
+            return self._rearm_tier1_reporting_locked()
+
+    def _rearm_tier1_reporting_locked(self) -> int:
+        """Body of rearm_tier1_reporting, for callers already holding the lock."""
+        count = 0
+        for meta in self.blacklist_meta.values():
+            if meta.get("lastSeenAt") is not None or meta.get("lastReportedAt") is not None:
+                meta["lastSeenAt"] = None
+                meta["lastReportedAt"] = None
+                count += 1
+        return count
 
     def remove_from_blacklist(self, mac: str) -> None:
         with self._lock:
@@ -216,6 +269,13 @@ class DaemonState:
                 return self.protected
             self.protected = value
             self.protected_since = time.time() if value else None
+            # Treat a toggle as the start of a new protection session: re-arm
+            # Tier-1 reporting so the next block from an already-known MAC is
+            # logged right away rather than waiting out the cooldown. Inlined
+            # because self._lock is already held and is not reentrant.
+            rearmed = self._rearm_tier1_reporting_locked()
+        if rearmed:
+            print(f"[DaemonState] Re-armed Tier-1 reporting for {rearmed} blacklisted MAC(s).")
         self._notify()
         return value
 
@@ -335,23 +395,27 @@ class CaptureEngine(threading.Thread):
                     self.state.dropped += 1
                     # Ceasing processing simulates a block.
 
-                # Surface this once per MAC — the visible proof that either this
-                # agent's own earlier detection (Tier 1) or another agent's
-                # report relayed through Bayanihan (Tier 3) is now protecting
-                # this machine. Gated behind mark_blacklist_reported so a
-                # sustained flood from one MAC produces one log line, not one
-                # per dropped packet.
-                if self.state.mark_blacklist_reported(src_mac):
+                # Surface this — the visible proof that either this agent's own
+                # earlier detection (Tier 1) or another agent's report relayed
+                # through Bayanihan (Tier 3) is now protecting this machine.
+                # classify_tier1_hit rate-limits it to one log per window, so a
+                # sustained flood reports periodically ("ongoing") rather than
+                # once per dropped packet, and a fresh burst reports as "new".
+                hit_kind = self.state.classify_tier1_hit(src_mac)
+                if hit_kind:
                     meta = self.state.blacklist_meta.get(src_mac, {})
                     added_at = meta.get("addedAt", datetime.now().strftime('%H:%M:%S'))
+                    still = "still blocking" if hit_kind == "ongoing" else None
 
                     if meta.get("origin") == "relay":
                         tier_label = "Tier 3"
                         reporter = meta.get("reportedBy") or "another agent"
-                        detail = f"blocked via Bayanihan, reported by {reporter} at {added_at}"
+                        lead = still or "blocked"
+                        detail = f"{lead} via Bayanihan, reported by {reporter} at {added_at}"
                     else:
                         tier_label = "Tier 1"
-                        detail = f"repeat block, first flagged locally at {added_at}"
+                        lead = still or "repeat block"
+                        detail = f"{lead}, first flagged locally at {added_at}"
 
                     event_id = len(self.state.events) + 1
                     threat_event = {
