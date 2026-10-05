@@ -21,26 +21,34 @@ echo Stopping SentiNet services...
 echo.
 
 :: --- 1. Service windows launched by our scripts --------------------------
+:: Matched by exact "SentiNet ..." window title only. The old fallback filters
+:: for the pre-reorganisation titles ("Admin Backend*", "Tray App*", etc.) are
+:: gone: WINDOWTITLE is a prefix match against every top-level window on the
+:: desktop, not just ours, so a generic title like that can match an unrelated
+:: window (a browser tab, another app) and /T then kills that window's whole
+:: process tree too.
 echo   Closing service windows...
-taskkill /FI "WINDOWTITLE eq SentiNet Admin Backend*"   /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq SentiNet Admin Dashboard*" /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq SentiNet Agent Daemon*"    /F /T >nul 2>&1
 
-:: Tray app first gets a non-forceful close so its CTRL_CLOSE handler can run
-:: and remove the notification-area icon (a force-killed process never gets
-:: to call Shell_NotifyIcon NIM_DELETE, leaving a "ghost" icon behind).
-taskkill /FI "WINDOWTITLE eq SentiNet Tray App*"        /T >nul 2>&1
+:: Agent Daemon installs no CTRL_CLOSE handler (see sentinet_daemon.py), so a
+:: graceful close would do nothing but wait - force it immediately.
+taskkill /FI "WINDOWTITLE eq SentiNet Agent Daemon*" /F /T >nul 2>&1
+
+:: Everything else gets a non-forceful close first: WM_CLOSE becomes
+:: CTRL_CLOSE_EVENT for the console process group, which the OS default
+:: handler (or, for the tray app, its own handler) uses to exit cleanly - for
+:: the tray app that is what lets it call Shell_NotifyIcon NIM_DELETE so the
+:: notification-area icon doesn't linger as a "ghost". Signalling all of them
+:: before waiting, instead of force-killing each in turn, also means the
+:: elevated windows aren't all hit with TerminateProcess at the same instant,
+:: which has been seen to leave Explorer's shell (taskbar, notification area)
+:: briefly unresponsive.
+for %%W in ("SentiNet Admin Backend" "SentiNet Admin Dashboard" "SentiNet Tray App" "SentiNet Agent Dashboard") do (
+    taskkill /FI "WINDOWTITLE eq %%~W*" /T >nul 2>&1
+)
 timeout /t 2 /nobreak >nul
-taskkill /FI "WINDOWTITLE eq SentiNet Tray App*"        /F /T >nul 2>&1
-
-taskkill /FI "WINDOWTITLE eq SentiNet Agent Dashboard*" /F /T >nul 2>&1
-
-:: Window titles from the pre-reorganisation scripts, for good measure.
-taskkill /FI "WINDOWTITLE eq Admin Backend*"   /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Admin Dashboard*" /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Agent Daemon*"    /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Tray App*"        /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Agent Dashboard*" /F /T >nul 2>&1
+for %%W in ("SentiNet Admin Backend" "SentiNet Admin Dashboard" "SentiNet Tray App" "SentiNet Agent Dashboard") do (
+    taskkill /FI "WINDOWTITLE eq %%~W*" /F /T >nul 2>&1
+)
 
 :: --- 2. Stragglers started outside the scripts ---------------------------
 echo   Sweeping up stray python processes...
