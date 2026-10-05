@@ -13,7 +13,9 @@ export interface AdminAgent {
   state: 'PROTECTED' | 'DETECTING' | 'SYNCING' | 'UNPROTECTED';
   syncProgress: number;
   cpu: number;
-  ram: number;
+  ram: number;                        // percent of the agent machine's RAM in use, host-wide
+  ramMb?: number | null;              // the SentiNet agent process's own RAM, MB
+  ramProcessPercent?: number | null;  // that as a share of the agent machine's RAM
   connectedSince: string;
   packetsProcessed: number;
 }
@@ -241,6 +243,66 @@ export async function signOutAdmin() {
   if (typeof window !== 'undefined') {
     window.localStorage.removeItem(SESSION_KEY);
   }
+}
+
+export type SopScenario = 'normal' | 'poisoning' | 'flooding';
+
+export interface SopEfficiencyScenario {
+  n: number;
+  meanCpu: number | null;
+  varianceCpu: number | null;
+  meanRamMb: number | null;
+  varianceRamMb: number | null;
+  live: boolean;
+}
+
+// Computed by the agent at start-up, from the held-out test set.
+export interface SopEvaluation {
+  threshold: number;
+  n: number;
+  truePositives: number;
+  falsePositives: number;
+  trueNegatives: number;
+  falseNegatives: number;
+  accuracy: number;
+  detectionRate: number;
+  falsePositiveRate: number;
+}
+
+export interface SopTtbTrial {
+  attackerMac: string;
+  detectedBy: string;
+  enforcedBy: string | null;
+  tDetectedMs: number;
+  tEnforcedMs: number | null;
+  ttbMs: number | null;
+  relayTtbMs: number | null;
+}
+
+export interface SopSummary {
+  efficiency: {
+    agent: string | null;  // the one agent these figures come from
+    scenarios: Record<SopScenario, SopEfficiencyScenario>;
+    sampleIntervalSeconds: number;
+  };
+  detection: {
+    evaluation: SopEvaluation | null;
+    blockedAttacks: number;
+    totalDetectedAttacks: number;
+    preventionRate: number | null;
+  };
+  timeToBlock: {
+    latest: SopTtbTrial | null;
+    n: number;
+    meanTtbMs: number | null;
+    varianceTtbMs: number | null;
+  };
+}
+
+// Null when the backend is unreachable — the SOP tab then shows its empty state
+// rather than invented figures.
+export async function getSopSummary() {
+  return requestWithFallback<SopSummary | null>('/sop/summary', () => null);
 }
 
 export async function getAdminDashboardSeed() {

@@ -8,6 +8,7 @@ dashboard can render the ledger without blocking on RPC round-trips.
 """
 
 import platform
+import statistics
 import threading
 import time
 import uuid
@@ -16,13 +17,14 @@ from datetime import datetime
 import psutil
 from typing import Optional, Dict, List, Any
 
-from sqlalchemy import create_engine, inspect, text, Column, Integer, String, Float, Boolean
+from sqlalchemy import create_engine, inspect, text, or_, Column, Integer, String, Float, Boolean
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 import multichain
 from config import (
     DEFAULT_AGENTS,
     SESSION_TIMEOUT_SECONDS,
+    AGENT_STALE_SECONDS,
     MULTICHAIN_ENABLED,
     MULTICHAIN_STREAM_NAME,
     TELEMETRY_SAMPLE_INTERVAL,
@@ -81,6 +83,11 @@ class DBThreat(Base):
     tier = Column(String)
     action = Column(String)
     detail = Column(String, nullable=True)  # e.g. "blocked via Bayanihan, reported by Agent A at 14:02:08"
+    # Agent-generated uuid4, carried end-to-end from CaptureEngine. Lets add_threat()
+    # dedupe: once agent-side reporting can retry (BayanihanClient's pending-report
+    # queue) and backfill on reconnect (register_agent's recentEvents), the same
+    # detection can legitimately arrive here more than once.
+    client_event_id = Column(String, nullable=True, index=True)
 
 class DBLedgerEntry(Base):
     __tablename__ = "ledger_entries"
@@ -118,6 +125,41 @@ class DBTelemetryReading(Base):
     protected = Column(Boolean)          # agent protection state at sample time
     scenario = Column(String, index=True)
     system = Column(String, index=True)  # 'sentinet' | whatever a baseline is named
+
+
+class DBTtbDetection(Base):
+    """
+    One first-detection of an attacker, the start of a Time-to-Block measurement.
+
+    Chapter 3 defines TTB = t_enforced - t_detected, where t_detected is when
+    Tier 2 at the detecting node (Node A) first classified the MAC as malicious.
+    That timestamp is taken on the agent and carried here in the attack report.
+    `relay_received_ms` is the relay's own clock at ingest, kept so a TTB can
+    still be derived on a single clock if the agents' clocks are not in sync.
+    """
+    __tablename__ = "ttb_detections"
+    event_id = Column(String, primary_key=True)   # the report's clientEventId
+    attacker_mac = Column(String, index=True)
+    detected_by = Column(String)                  # detecting agent's name (or MAC)
+    t_detected_ms = Column(Float)                 # agent clock, epoch ms
+    relay_received_ms = Column(Float)             # relay clock, epoch ms
+    created_ts = Column(Float, index=True)
+
+
+class DBTtbEnforcement(Base):
+    """
+    One other node writing that attacker into its Tier-1 blacklist — t_enforced.
+
+    A detection has one row here per node that enforced it, so a single trial on
+    a three-agent testbed yields two TTB measurements.
+    """
+    __tablename__ = "ttb_enforcements"
+    id = Column(Integer, primary_key=True, index=True)
+    event_id = Column(String, index=True)
+    enforced_by = Column(String)                  # enforcing agent's name
+    enforced_by_mac = Column(String, index=True)
+    t_enforced_ms = Column(Float)                 # agent clock, epoch ms
+    relay_acked_ms = Column(Float)                # relay clock, epoch ms
 
 
 class DBBlacklistEntry(Base):
@@ -159,8 +201,10 @@ class DBAgent(Base):
     cpu = Column(Float)              # percent, of the agent's SentiNet process
     ram = Column(Float)              # percent of system RAM — display only
     ram_mb = Column(Float)           # RSS in MB — the figure the paper specifies
+    ram_process_percent = Column(Float, nullable=True)  # that RSS as a share of the agent machine's RAM
     connected_since = Column(String)
     packets_processed = Column(Integer)
+    last_seen = Column(Float, nullable=True)  # unix time of the last register/telemetry; see get_agents()
 
 Base.metadata.create_all(bind=engine)
 
@@ -179,8 +223,8 @@ def _migrate_schema():
     # no ALTER — only genuinely new columns do.
     additions = {
         'ledger_entries': {'txid': 'VARCHAR', 'created_at': 'FLOAT'},
-        'agents': {'ram_mb': 'FLOAT'},
-        'threats': {'detail': 'VARCHAR'},
+        'agents': {'ram_mb': 'FLOAT', 'last_seen': 'FLOAT', 'ram_process_percent': 'FLOAT'},
+        'threats': {'detail': 'VARCHAR', 'client_event_id': 'VARCHAR'},
     }
 
     with engine.begin() as conn:
@@ -233,13 +277,15 @@ def upsert_agent(agent_data: Dict[str, Any]) -> None:
             cpu=0,
             ram=0,
             connected_since=now,
-            packets_processed=0
+            packets_processed=0,
+            last_seen=time.time(),
         )
         db.add(db_agent)
     else:
         db_agent.ip = agent_data.get('ip', db_agent.ip)
         db_agent.state = agent_data.get('state', db_agent.state)
-        
+        db_agent.last_seen = time.time()
+
     db.commit()
     db.close()
 
@@ -250,9 +296,14 @@ def update_agent_telemetry(
     agent_state: Optional[str] = None,
     ram_mb: Optional[float] = None,
     protected: Optional[bool] = None,
+    scenario: Optional[str] = None,
+    ram_process_percent: Optional[float] = None,
 ) -> None:
     """
     Store an agent's latest reading for the dashboard, and append a sample.
+
+    `scenario` is the traffic scenario the agent says it is experiencing, which
+    labels the appended sample (see record_reading) and the SOP 1 snapshot.
 
     cpu and ram are no longer truncated with int(): a t-test over percentages
     loses real precision if 12.9 is recorded as 12.
@@ -266,8 +317,11 @@ def update_agent_telemetry(
             db_agent.ram = float(ram)
             if ram_mb is not None:
                 db_agent.ram_mb = float(ram_mb)
+            if ram_process_percent is not None:
+                db_agent.ram_process_percent = float(ram_process_percent)
             if agent_state:
                 db_agent.state = agent_state
+            db_agent.last_seen = time.time()
             node_name = db_agent.name
             db.commit()
     finally:
@@ -276,6 +330,7 @@ def update_agent_telemetry(
     # Only agents reporting MB give us a paper-compliant sample; an older agent
     # build sending percent only is recorded without one rather than guessed at.
     if node_name is not None:
+        _take_sop_snapshot(mac, node_name, cpu, ram_mb, protected, scenario)
         record_reading(
             source='agent',
             node=node_name,
@@ -284,10 +339,13 @@ def update_agent_telemetry(
             ram_percent=ram,
             mac=mac,
             protected=protected,
+            scenario=scenario,
         )
 
 
 def remove_agent(mac: str) -> None:
+    with _record_lock:
+        _sop_agents.pop(mac, None)
     db = SessionLocal()
     db_agent = db.query(DBAgent).filter(DBAgent.mac == mac).first()
     if db_agent:
@@ -387,10 +445,124 @@ def clear_blacklist() -> int:
 psutil.cpu_percent(None)
 
 # When each source was last written to telemetry_readings, keyed by 'relay' or a
-# MAC. Agents push telemetry roughly every second; only one sample per interval
-# is persisted.
+# MAC, plus the scenario label. Agents push telemetry roughly every second; only
+# one sample per interval is persisted per scenario — keying on the scenario too
+# means an agent that goes from normal traffic to under attack gets a reading
+# for the new scenario straight away rather than up to a minute later.
 _last_recorded: Dict[str, float] = {}
 _record_lock = threading.Lock()
+
+# The connected agents, keyed by MAC in the order they connected. The SOP tab
+# reports on one agent only — the first in this dict — since several would give
+# several competing sets of figures; when it disconnects the next in line takes
+# over. Only that agent accumulates anything: a CPU/RAM snapshot of its telemetry
+# every TELEMETRY_SAMPLE_INTERVAL per traffic scenario (SOP 1), and a count of
+# its detections (SOP 2). So an agent that takes over starts from fresh readings.
+# In memory only, so the tab also starts empty whenever the relay is restarted.
+_sop_agents: Dict[str, Dict[str, Any]] = {}
+
+
+def _sop_entry_locked(mac: str, name: str) -> Dict[str, Any]:
+    """This agent's entry, created at the back of the line if new. Hold _record_lock."""
+    entry = _sop_agents.get(mac)
+    if entry is None:
+        entry = _sop_agents[mac] = {
+            'evaluation': None,
+            'scenario': None,
+            'snapshots': {s: {'cpu': [], 'ram': []} for s in SOP_SCENARIOS},
+            'last_snapshot': {},
+            'detected': 0,
+            'blocked': 0,
+        }
+    entry['name'] = name
+    entry['last_seen'] = time.time()
+    return entry
+
+
+def _sop_head_locked() -> Optional[str]:
+    """
+    MAC of the agent the SOP tab reports on. Hold _record_lock.
+
+    An agent whose heartbeat has gone stale without a disconnect event is
+    dropped here, so a ghost cannot hold the front of the line.
+    """
+    cutoff = time.time() - AGENT_STALE_SECONDS
+    for mac in [m for m, e in _sop_agents.items() if e['last_seen'] < cutoff]:
+        del _sop_agents[mac]
+    return next(iter(_sop_agents), None)
+
+
+def register_sop_agent(mac: str, name: str, evaluation: Optional[Dict[str, Any]]) -> None:
+    """
+    Put a newly registered agent in line, with the held-out test set figures it
+    computed for its own model at start-up (SOP 2's confusion matrix).
+    """
+    with _record_lock:
+        entry = _sop_entry_locked(mac, name)
+        if isinstance(evaluation, dict):
+            entry['evaluation'] = evaluation
+
+
+def count_sop_detection(mac: Optional[str], action: Optional[str]) -> None:
+    """
+    Count one Tier-2 detection towards SOP 2's prevention rate (Chapter 3,
+    Equation 4), if it came from the agent the SOP tab is reporting on.
+    """
+    with _record_lock:
+        if not mac or mac != _sop_head_locked():
+            return
+        entry = _sop_agents[mac]
+        entry['detected'] += 1
+        if (action or '').lower() == 'blocked':
+            entry['blocked'] += 1
+
+
+def _take_sop_snapshot(
+    mac: str,
+    name: str,
+    cpu: float,
+    ram_mb: Optional[float],
+    protected: Optional[bool],
+    scenario: Optional[str],
+) -> None:
+    """Note an agent's current scenario, and keep one snapshot per interval."""
+    now = time.time()
+    label = _canonical_scenario(TELEMETRY_SCENARIO or scenario)
+    with _record_lock:
+        entry = _sop_entry_locked(mac, name)
+        entry['scenario'] = label
+        if mac != _sop_head_locked():
+            return
+
+        # Only an agent reporting MB gives a paper-compliant figure, and only
+        # while protection is on is it SentiNet's working footprint.
+        if label is None or ram_mb is None or protected is False:
+            return
+        # Per scenario, so an agent that comes under attack gets a snapshot for
+        # the new scenario straight away rather than up to a minute later.
+        last = entry['last_snapshot'].get(label)
+        if last is not None and (now - last) < TELEMETRY_SAMPLE_INTERVAL:
+            return
+        entry['last_snapshot'][label] = now
+        entry['snapshots'][label]['cpu'].append(float(cpu))
+        entry['snapshots'][label]['ram'].append(float(ram_mb))
+
+
+def _current_sop_agent() -> Optional[Dict[str, Any]]:
+    """A copy of what has accumulated for the agent the SOP tab reports on."""
+    with _record_lock:
+        mac = _sop_head_locked()
+        if mac is None:
+            return None
+        entry = _sop_agents[mac]
+        return {
+            'name': entry['name'],
+            'scenario': entry['scenario'],
+            'evaluation': entry['evaluation'],
+            'detected': entry['detected'],
+            'blocked': entry['blocked'],
+            'snapshots': {s: {k: list(v) for k, v in entry['snapshots'][s].items()} for s in SOP_SCENARIOS},
+        }
 
 
 def _should_record(key: str, now: float) -> bool:
@@ -414,10 +586,17 @@ def record_reading(
     mac: Optional[str] = None,
     protected: Optional[bool] = None,
     system: str = 'sentinet',
+    scenario: Optional[str] = None,
 ) -> None:
-    """Append one resource-consumption sample. Call freely; rate limiting is here."""
+    """
+    Append one resource-consumption sample. Call freely; rate limiting is here.
+
+    The label is TELEMETRY_SCENARIO when that is set — a manual override for a
+    formal run — and otherwise the scenario the agent reported for itself.
+    """
     now = time.time()
-    if not _should_record(mac or source, now):
+    label = TELEMETRY_SCENARIO or scenario or None
+    if not _should_record(f"{mac or source}|{label or ''}", now):
         return
 
     db = SessionLocal()
@@ -432,7 +611,7 @@ def record_reading(
             ram_mb=float(ram_mb),
             ram_percent=float(ram_percent) if ram_percent is not None else None,
             protected=protected,
-            scenario=TELEMETRY_SCENARIO or None,
+            scenario=label,
             system=system,
         ))
         db.commit()
@@ -539,6 +718,216 @@ def get_readings(scenario: Optional[str] = None) -> List[Dict[str, Any]]:
         ]
     finally:
         db.close()
+
+
+# ─── Time-to-Block (SOP 3) ─────────────────────────────────────────────────
+
+def agent_name_for(mac: Optional[str]) -> Optional[str]:
+    """The registered name of the agent with this MAC, if it is known."""
+    if not mac:
+        return None
+    db = SessionLocal()
+    try:
+        row = db.query(DBAgent).filter(DBAgent.mac == mac).first()
+        return row.name if row else None
+    finally:
+        db.close()
+
+
+def record_ttb_detection(
+    event_id: str,
+    attacker_mac: str,
+    detected_by: str,
+    t_detected_ms: float,
+    relay_received_ms: float,
+) -> None:
+    """Record t_detected for a first detection. Idempotent on the event id."""
+    db = SessionLocal()
+    try:
+        if db.query(DBTtbDetection).filter(DBTtbDetection.event_id == event_id).first():
+            return
+        db.add(DBTtbDetection(
+            event_id=event_id,
+            attacker_mac=attacker_mac,
+            detected_by=detected_by,
+            t_detected_ms=float(t_detected_ms),
+            relay_received_ms=float(relay_received_ms),
+            created_ts=time.time(),
+        ))
+        db.commit()
+    finally:
+        db.close()
+
+
+def record_ttb_enforcement(
+    event_id: str,
+    enforced_by: str,
+    enforced_by_mac: str,
+    t_enforced_ms: float,
+    relay_acked_ms: float,
+) -> bool:
+    """
+    Record t_enforced for one node. Returns False if the detection is unknown or
+    this node has already been recorded for it.
+    """
+    db = SessionLocal()
+    try:
+        if not db.query(DBTtbDetection).filter(DBTtbDetection.event_id == event_id).first():
+            return False
+        duplicate = db.query(DBTtbEnforcement).filter(
+            DBTtbEnforcement.event_id == event_id,
+            DBTtbEnforcement.enforced_by_mac == enforced_by_mac,
+        ).first()
+        if duplicate:
+            return False
+        db.add(DBTtbEnforcement(
+            event_id=event_id,
+            enforced_by=enforced_by,
+            enforced_by_mac=enforced_by_mac,
+            t_enforced_ms=float(t_enforced_ms),
+            relay_acked_ms=float(relay_acked_ms),
+        ))
+        db.commit()
+        return True
+    finally:
+        db.close()
+
+
+# ─── SOP summary ───────────────────────────────────────────────────────────
+
+SOP_SCENARIOS = ('normal', 'poisoning', 'flooding')
+
+
+def _canonical_scenario(label: Optional[str]) -> Optional[str]:
+    """
+    Map a stored scenario label onto one of the paper's three.
+
+    Agents report the canonical names. A TELEMETRY_SCENARIO override is free
+    text ("baseline", "arp_flood_1000pps", ...), so match on what it contains.
+    """
+    text_label = (label or '').lower()
+    if 'flood' in text_label:
+        return 'flooding'
+    if 'poison' in text_label or 'spoof' in text_label or 'mitm' in text_label:
+        return 'poisoning'
+    if 'normal' in text_label or 'baseline' in text_label or 'benign' in text_label:
+        return 'normal'
+    return None
+
+
+def _mean_and_variance(values: List[float]) -> Dict[str, Optional[float]]:
+    """Arithmetic mean and sample variance (n-1), per Chapter 3's Equations 9-10."""
+    if not values:
+        return {'mean': None, 'variance': None}
+    return {
+        'mean': statistics.fmean(values),
+        'variance': statistics.variance(values) if len(values) > 1 else None,
+    }
+
+
+def get_sop_summary() -> Dict[str, Any]:
+    """
+    The SentiNet half of each Statement-of-the-Problem answer, from recorded data.
+
+    SOP 1: mean CPU (%) and RAM (MB) per traffic scenario, over the snapshots
+    taken of one agent's telemetry since it connected (see _current_sop_agent).
+
+    SOP 2: the confusion matrix and accuracy that agent computed on the held-out
+    test set, plus the prevention rate (Chapter 3, Equation 4) over the Tier-2
+    detections it has reported since it became the reporting agent.
+
+    SOP 3: Time-to-Block per (detection, enforcing node) pair, with the latest
+    trial's two timestamps and the mean and sample variance across all of them.
+    """
+    db = SessionLocal()
+    try:
+        detections = db.query(DBTtbDetection).order_by(DBTtbDetection.created_ts.asc()).all()
+        enforcements = db.query(DBTtbEnforcement).order_by(DBTtbEnforcement.id.asc()).all()
+    finally:
+        db.close()
+
+    sop_agent = _current_sop_agent()
+
+    # ── SOP 2 ──
+    # A Tier-2 report is one detected attack; Tier-1/Tier-3 reports are repeat
+    # blocks of a MAC that was already detected, not new detections.
+    total_detected = sop_agent['detected'] if sop_agent else 0
+    blocked_attacks = sop_agent['blocked'] if sop_agent else 0
+
+    # ── SOP 1 ──
+    grouped: Dict[str, Dict[str, List[float]]] = (
+        sop_agent['snapshots'] if sop_agent else {s: {'cpu': [], 'ram': []} for s in SOP_SCENARIOS}
+    )
+
+    efficiency = {}
+    for scenario in SOP_SCENARIOS:
+        cpu = _mean_and_variance(grouped[scenario]['cpu'])
+        ram = _mean_and_variance(grouped[scenario]['ram'])
+        efficiency[scenario] = {
+            'n': len(grouped[scenario]['cpu']),
+            'meanCpu': cpu['mean'],
+            'varianceCpu': cpu['variance'],
+            'meanRamMb': ram['mean'],
+            'varianceRamMb': ram['variance'],
+            'live': bool(sop_agent) and sop_agent['scenario'] == scenario,
+        }
+
+    # ── SOP 3 ──
+    by_event = {d.event_id: d for d in detections}
+    trials = []
+    for e in enforcements:
+        d = by_event.get(e.event_id)
+        if d is None:
+            continue
+        trials.append({
+            'attackerMac': d.attacker_mac,
+            'detectedBy': d.detected_by,
+            'enforcedBy': e.enforced_by,
+            'tDetectedMs': d.t_detected_ms,
+            'tEnforcedMs': e.t_enforced_ms,
+            # The paper's formula, on the two agents' own clocks.
+            'ttbMs': e.t_enforced_ms - d.t_detected_ms,
+            # The same interval on the relay's clock alone: report received to
+            # enforcement acknowledged. Immune to clock skew between agents, but
+            # it leaves out A's detection-to-send time and adds B's ack trip.
+            'relayTtbMs': e.relay_acked_ms - d.relay_received_ms,
+        })
+
+    latest = trials[-1] if trials else None
+    if latest is None and detections:
+        # Detected, but no other node has enforced it yet (or none is connected).
+        d = detections[-1]
+        latest = {
+            'attackerMac': d.attacker_mac,
+            'detectedBy': d.detected_by,
+            'enforcedBy': None,
+            'tDetectedMs': d.t_detected_ms,
+            'tEnforcedMs': None,
+            'ttbMs': None,
+            'relayTtbMs': None,
+        }
+
+    ttb_stats = _mean_and_variance([t['ttbMs'] for t in trials])
+
+    return {
+        'efficiency': {
+            'agent': sop_agent['name'] if sop_agent else None,
+            'scenarios': efficiency,
+            'sampleIntervalSeconds': TELEMETRY_SAMPLE_INTERVAL,
+        },
+        'detection': {
+            'evaluation': sop_agent['evaluation'] if sop_agent else None,
+            'blockedAttacks': blocked_attacks,
+            'totalDetectedAttacks': total_detected,
+            'preventionRate': (blocked_attacks / total_detected * 100) if total_detected else None,
+        },
+        'timeToBlock': {
+            'latest': latest,
+            'n': len(trials),
+            'meanTtbMs': ttb_stats['mean'],
+            'varianceTtbMs': ttb_stats['variance'],
+        },
+    }
 
 
 # ─── MultiChain Integration ────────────────────────────────────────────────
@@ -712,7 +1101,30 @@ def destroy_session(session_token: str) -> None:
 
 
 def get_agents() -> List[Dict[str, Any]]:
+    """
+    All agents, pruning any whose last heartbeat (register_agent or
+    telemetry_report) has gone stale.
+
+    remove_agent() — called from the Socket.IO `disconnect` handler — is not
+    enough on its own: that event can only fire for a connection *this* relay
+    process is itself holding. A hard-killed agent (stop_all.bat's
+    taskkill /F skips any graceful sio.disconnect()) or, especially, a relay
+    restart (in-memory connection state always resets, but the persisted
+    agents table never did) can both leave a row with no live socket left
+    anywhere to ever disconnect — a ghost with no automatic expiry. Pruning by
+    last_seen here means staleness self-heals on the very next poll instead of
+    depending on an event that may never come.
+    """
     db = SessionLocal()
+    cutoff = time.time() - AGENT_STALE_SECONDS
+    stale = db.query(DBAgent).filter(
+        or_(DBAgent.last_seen.is_(None), DBAgent.last_seen < cutoff)
+    ).all()
+    if stale:
+        for a in stale:
+            db.delete(a)
+        db.commit()
+
     db_agents = db.query(DBAgent).all()
     results = [
         {
@@ -725,6 +1137,7 @@ def get_agents() -> List[Dict[str, Any]]:
             'cpu': a.cpu,
             'ram': a.ram,
             'ramMb': a.ram_mb,
+            'ramProcessPercent': a.ram_process_percent,
             'connectedSince': a.connected_since,
             'packetsProcessed': a.packets_processed
         } for a in db_agents
@@ -876,8 +1289,34 @@ def get_threat_history() -> List[Dict[str, Any]]:
     return history
 
 
-def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confidence: str = "99.9%", detail: Optional[str] = None) -> Dict[str, Any]:
+def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confidence: str = "99.9%",
+                detail: Optional[str] = None, client_event_id: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Insert one threat record. Idempotent when `client_event_id` is given: a
+    second call with the same id (an agent-side retry, or a register_agent
+    backfill of an already-delivered report) returns the existing row instead
+    of inserting a duplicate. Callers can check the returned `isNew` flag to
+    decide whether to also touch the blacklist / broadcast.
+    """
     db = SessionLocal()
+
+    if client_event_id:
+        existing = db.query(DBThreat).filter(DBThreat.client_event_id == client_event_id).first()
+        if existing:
+            threat_dict = {
+                'id': existing.id,
+                'timestamp': existing.timestamp,
+                'sourceMac': existing.source_mac,
+                'attackType': existing.attack_type,
+                'tier': existing.tier,
+                'action': existing.action,
+                'confidence': confidence,
+                'detail': existing.detail,
+                'isNew': False,
+            }
+            db.close()
+            return threat_dict
+
     now = datetime.now().strftime('%H:%M:%S')
     db_threat = DBThreat(
         timestamp=now,
@@ -886,6 +1325,7 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
         tier=tier,
         action=action,
         detail=detail,
+        client_event_id=client_event_id,
     )
     db.add(db_threat)
     db.commit()
@@ -900,10 +1340,11 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
         'action': db_threat.action,
         'confidence': confidence,
         'detail': db_threat.detail,
+        'isNew': True,
     }
     db.close()
-    
+
     # Try publishing to MultiChain
     write_to_multichain(threat_dict)
-    
+
     return threat_dict

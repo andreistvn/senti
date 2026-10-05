@@ -9,6 +9,10 @@ from collections import defaultdict
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODEL_PATH = os.path.join(BASE_DIR, 'ml_models', 'sentinet_rf_model.joblib')
 ENCODER_PATH = os.path.join(BASE_DIR, 'ml_models', 'sentinet_label_encoder.joblib')
+# Held-out test set (a copy of model-training/test.csv), for evaluate() below.
+TEST_DATA_PATH = os.path.join(BASE_DIR, 'ml_models', 'test.csv')
+# Score at or above which Tier 2 classifies a MAC as malicious.
+DECISION_THRESHOLD = 0.50
 
 # Must match FEATURE_COLUMNS in model-training/train_sentinet.py, in order -
 # the model was fit on a DataFrame with these column names, and predict_proba
@@ -44,6 +48,44 @@ class MLEngine:
         except Exception as e:
             print(f"[MLEngine] WARNING: Failed to load model: {e}")
             self.model = None
+
+    def evaluate(self):
+        """
+        Score the loaded model against the held-out test set (SOP 2).
+
+        Same procedure as model-training/evaluate_sentinet.py. Run once at
+        start-up and sent to the relay with this agent's registration, so the
+        admin dashboard shows the figures for the model this agent is actually
+        running. Returns None if the model or the test set is unavailable.
+        """
+        if self.model is None:
+            return None
+        try:
+            label_map = joblib.load(ENCODER_PATH)
+            test_df = pd.read_csv(TEST_DATA_PATH)
+            y_true = test_df['label'].map(label_map).to_numpy()
+            probs = self.model.predict_proba(test_df[FEATURE_COLUMNS])[:, 1]
+            preds = (probs >= DECISION_THRESHOLD).astype(int)
+        except Exception as e:
+            print(f"[MLEngine] WARNING: Could not evaluate the model: {e}")
+            return None
+
+        tp = int(((preds == 1) & (y_true == 1)).sum())
+        fp = int(((preds == 1) & (y_true == 0)).sum())
+        tn = int(((preds == 0) & (y_true == 0)).sum())
+        fn = int(((preds == 0) & (y_true == 1)).sum())
+        n = tp + fp + tn + fn
+        return {
+            "threshold": DECISION_THRESHOLD,
+            "n": n,
+            "truePositives": tp,
+            "falsePositives": fp,
+            "trueNegatives": tn,
+            "falseNegatives": fn,
+            "accuracy": (tp + tn) / n * 100 if n else None,
+            "detectionRate": tp / (tp + fn) * 100 if (tp + fn) else None,
+            "falsePositiveRate": fp / (fp + tn) * 100 if (fp + tn) else None,
+        }
 
     def process_packet(self, src_mac: str, op: int, src_ip: str, dst_ip: str) -> float:
         """
@@ -128,16 +170,24 @@ class MLEngine:
         diffs = [timestamps[i] - timestamps[i-1] for i in range(1, len(timestamps))]
         if diffs:
             ia_mean = sum(diffs) / len(diffs)
-            ia_var = sum((x - ia_mean)**2 for x in diffs) / len(diffs)
+            # Sample variance (n-1), as the training data computed it.
+            ia_var = sum((x - ia_mean)**2 for x in diffs) / (len(diffs) - 1) if len(diffs) > 1 else 0.0
         else:
             ia_mean = 0.0
             ia_var = 0.0
             
-        # Calculate burstiness (max packets in any given 1-second interval)
-        buckets = defaultdict(int)
+        # Burstiness: sample variance of the packet counts in the window's five
+        # 1-second sub-intervals, matching how the training data defined it
+        # (model-training/README.md). Evenly paced traffic scores near zero; the
+        # same number of packets arriving in one spike scores high. Sub-intervals
+        # are counted back from the newest packet, and empty ones count as zero.
+        sub_intervals = int(self.window_size)
+        counts = [0] * sub_intervals
+        newest = timestamps[-1]
         for t in timestamps:
-            buckets[int(t)] += 1
-        burstiness = max(buckets.values()) if buckets else 0
+            counts[min(int(newest - t), sub_intervals - 1)] += 1
+        mean_count = len(timestamps) / sub_intervals
+        burstiness = sum((c - mean_count) ** 2 for c in counts) / (sub_intervals - 1)
         
         unique_ip_count = len(unique_ips)
         

@@ -35,3 +35,28 @@ IPC_SOCKET_PATH = os.environ.get("SENTINET_IPC_SOCKET", "/tmp/sentinet.sock")
 
 # IPC: TCP fallback port for Windows (where Unix sockets are unavailable).
 IPC_TCP_FALLBACK_PORT = int(os.environ.get("SENTINET_IPC_PORT", "8769"))
+
+# Bayanihan attack-report delivery. Reports are queued durably (SQLite) and
+# retried with an ack until the relay confirms it stored them — see
+# bayanihan_client.py. PENDING_REPORTS_DB_PATH is where that queue survives a
+# daemon restart; REPORT_QUEUE_MAX caps it so a relay outage can't grow it
+# without bound (oldest unsent report is dropped first); REPORT_ACK_TIMEOUT is
+# how long one delivery attempt waits for the relay's ack before retrying.
+PENDING_REPORTS_DB_PATH = os.environ.get(
+    "SENTINET_PENDING_REPORTS_DB",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "pending_reports.db"),
+)
+REPORT_QUEUE_MAX = int(os.environ.get("SENTINET_REPORT_QUEUE_MAX", "2000"))
+REPORT_ACK_TIMEOUT = float(os.environ.get("SENTINET_REPORT_ACK_TIMEOUT", "8.0"))
+REPORT_RETRY_INTERVAL = float(os.environ.get("SENTINET_REPORT_RETRY_INTERVAL", "2.0"))
+
+# Traffic-scenario labelling for the resource-consumption readings (SOP 1).
+# Chapter 3 evaluates CPU/RAM under three scenarios: normal traffic, targeted
+# ARP poisoning (~100 PPS) and sustained ARP flooding (~1,000 PPS). The agent
+# labels each reading with the one it is currently experiencing, judged from the
+# rate of attack packets Tier 1 is dropping, averaged over SCENARIO_WINDOW_SECONDS:
+# none -> "normal", below FLOOD_PPS_THRESHOLD -> "poisoning", at or above ->
+# "flooding". The default sits at the geometric midpoint of the paper's two
+# attack rates, since neither generator delivers its nominal rate exactly.
+FLOOD_PPS_THRESHOLD = float(os.environ.get("SENTINET_FLOOD_PPS_THRESHOLD", "300"))
+SCENARIO_WINDOW_SECONDS = float(os.environ.get("SENTINET_SCENARIO_WINDOW", "5.0"))

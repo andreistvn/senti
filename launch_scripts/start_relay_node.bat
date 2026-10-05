@@ -81,6 +81,15 @@ if not exist "%CHAIN_DIR%\params.dat" (
     multichain-util create %CHAIN_NAME%
     if errorlevel 1 (
         echo ERROR: multichain-util create failed.
+        echo.
+        echo        multichain-util.exe is unsigned, so Windows Smart App Control
+        echo        or an antivirus can block it from running at all. Check
+        echo        Event Viewer under Applications and Services Logs,
+        echo        Microsoft, Windows, CodeIntegrity, Operational for a block
+        echo        naming multichain-util.exe.
+        echo.
+        echo        A chain created on another machine can be copied into
+        echo        %%APPDATA%%\MultiChain\ instead - the node itself runs fine.
         pause
         exit /b 1
     )
@@ -88,36 +97,79 @@ if not exist "%CHAIN_DIR%\params.dat" (
     echo [1/4] Chain '%CHAIN_NAME%' already exists.
 )
 
-multichain-cli %CHAIN_NAME% getinfo >nul 2>&1
-if errorlevel 1 (
-    :: NOTE: MultiChain's own Windows README states "The multichaind -daemon flag
-    :: does not work, so open another cmd prompt." So we launch it in its own
-    :: window instead of daemonising. The window stays open (cmd /k) so that if
-    :: the node dies you can actually read why.
+:: Liveness is checked over HTTP JSON-RPC rather than with multichain-cli.
+:: multichain-cli.exe is unsigned, so Smart App Control or an antivirus can block
+:: it outright - and when the probe cannot run, the old code here concluded "no
+:: node is running" and started a SECOND multichaind on a chain that already had
+:: one. The two collide on the permissions.db LevelDB lock and the new one dies
+:: with "The handle is invalid", which looks like a corrupt chain but is not.
+::
+:: The relay never uses the CLI either: admin-backend\multichain.py speaks
+:: JSON-RPC and reads its credentials from multichain.conf. So this probe tests
+:: the same path the relay will actually use. See windows\Test-ChainRpc.ps1.
+set "MC_LOG=%TEMP%\sentinet_chainrpc.log"
+>"%MC_LOG%" echo [%DATE% %TIME%] SentiNet MultiChain probe log
+
+call :probe_rpc
+if not errorlevel 1 goto :chain_running
+
+:: Probe said no. Before launching anything, ask whether a daemon is already
+:: alive - this is the check that was missing.
+set "MC_RUNNING="
+tasklist /FI "IMAGENAME eq multichaind.exe" 2>nul | find /i "multichaind.exe" >nul
+if not errorlevel 1 set "MC_RUNNING=1"
+
+:: MultiChain's own Windows README states "The multichaind -daemon flag does not
+:: work, so open another cmd prompt." So the node gets its own window instead of
+:: daemonising, left open with cmd /k so a crash can be read. This comment sits
+:: outside the if/else below on purpose: a :: line inside a ( ) block is parsed
+:: as a label and can break the block.
+if defined MC_RUNNING (
+    echo       multichaind.exe is already running - not starting a second one.
+) else (
     echo       Starting multichaind in its own window...
     start "SentiNet MultiChain Node" cmd /k "multichaind %CHAIN_NAME%"
-
-    echo       Waiting for RPC to accept connections...
-    set "CHAIN_UP="
-    for /l %%i in (1,1,30) do (
-        if not defined CHAIN_UP (
-            timeout /t 1 /nobreak >nul
-            multichain-cli %CHAIN_NAME% getinfo >nul 2>&1
-            if not errorlevel 1 set "CHAIN_UP=1"
-        )
-    )
-    if not defined CHAIN_UP (
-        echo ERROR: MultiChain node did not come up.
-        echo        Check the "SentiNet MultiChain Node" window for the reason.
-        echo        Antivirus/firewall blocking multichaind.exe is a common cause
-        echo        on Windows - MultiChain's own README warns about this.
-        pause
-        exit /b 1
-    )
-    echo       Node is up.
-) else (
-    echo       Node is already running.
 )
+
+echo       Waiting for RPC to accept connections...
+set "CHAIN_UP="
+for /l %%i in (1,1,30) do (
+    if not defined CHAIN_UP (
+        timeout /t 1 /nobreak >nul
+        call :probe_rpc
+        if not errorlevel 1 set "CHAIN_UP=1"
+    )
+)
+if defined CHAIN_UP goto :chain_up
+
+echo.
+echo ERROR: the MultiChain node is not answering JSON-RPC.
+if defined MC_RUNNING goto :chain_err_orphan
+echo        No multichaind.exe process is running, so it exited during startup.
+echo        Read the "SentiNet MultiChain Node" window for the reason -
+echo        antivirus quarantining multichaind.exe is the usual cause.
+goto :chain_err_tail
+
+:chain_err_orphan
+echo        A multichaind.exe process IS running but never answered RPC.
+echo        Either it is still replaying the chain, or an orphan from an
+echo        earlier session is holding it. Run launch_scripts\stop_all.bat
+echo        to clear it, then start again.
+
+:chain_err_tail
+echo.
+echo        Probe log - this is the real error, no longer swallowed by nul:
+type "%MC_LOG%"
+echo.
+pause
+exit /b 1
+
+:chain_up
+echo       Node is up.
+goto :chain_done
+
+:chain_running
+echo       Node is already running.
 goto :chain_done
 
 :chain_skip
@@ -186,3 +238,13 @@ echo.
 echo    Stop everything: launch_scripts\stop_all.bat
 echo.
 pause
+exit /b 0
+
+
+:: --- Subroutines ---------------------------------------------------------
+
+:probe_rpc
+:: Returns 0 if the node answers getinfo. Output is appended to %MC_LOG% rather
+:: than discarded, so a failure leaves a readable reason behind.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\launch_scripts\windows\Test-ChainRpc.ps1" -ChainDir "%CHAIN_DIR%" >>"%MC_LOG%" 2>&1
+exit /b !ERRORLEVEL!
