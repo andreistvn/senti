@@ -144,9 +144,10 @@ class DaemonState:
         "relay", proving the intelligence came from another node. `reported_by`
         names which agent originally reported it, for relay-origin entries.
 
-        `lastSeenAt` is the monotonic timestamp of the most recent Tier-1 hit on
-        this MAC; `should_report_tier1_hit` uses it to decide when a block is
-        worth logging again (see that method).
+        `lastSeenAt` / `lastReportedAt` are monotonic timestamps of the most
+        recent Tier-1 hit and the most recent logged report for this MAC;
+        `classify_tier1_hit` uses them to decide when a block is worth logging
+        again, and whether it reads as a new burst or an ongoing one.
         """
         with self._lock:
             is_new = mac not in self.blacklist
@@ -160,38 +161,52 @@ class DaemonState:
                     "confidence": confidence,
                     "reportedBy": reported_by,
                     "lastSeenAt": None,
+                    "lastReportedAt": None,
                 }
             return is_new
 
-    def should_report_tier1_hit(self, mac: str) -> bool:
+    def classify_tier1_hit(self, mac: str) -> Optional[str]:
         """
-        Decide whether this Tier-1 block is worth logging, and record the hit.
+        Record a Tier-1 hit and decide whether it is worth logging.
 
-        Returns True on the first hit for a blacklist entry, and again whenever
-        at least TIER1_REPORT_COOLDOWN_SECONDS of quiet passed since the last
-        packet from this MAC. Keying off the gap between *packets* rather than a
-        fixed interval since the last report is deliberate: a sustained flood
-        keeps resetting the timer, so it stays at a single log line, while
-        stopping the attack and starting it again reads as a new burst and
-        reports afresh.
+        Returns None to stay silent, "new" for the first block of a fresh burst,
+        or "ongoing" for the periodic reminder that an attack is still being
+        blocked. Both are rate-limited to one log per
+        TIER1_REPORT_COOLDOWN_SECONDS, measured from the last *report* — so a
+        flood dropping a thousand packets a second produces a readable trickle
+        (one line per window) instead of one line per packet, while still
+        proving protection is actively working for as long as it lasts.
+
+        A gap of at least one window since the previous packet is what marks a
+        hit as "new": nothing arrived for long enough that this is a fresh burst
+        rather than a continuation of one already being reported.
         """
         now = time.monotonic()
         with self._lock:
             meta = self.blacklist_meta.get(mac)
             if meta is None:
-                return False
+                return None
 
             last_seen = meta.get("lastSeenAt")
+            last_reported = meta.get("lastReportedAt")
             meta["lastSeenAt"] = now
 
-            if last_seen is None:
-                return True
-            return (now - last_seen) >= TIER1_REPORT_COOLDOWN_SECONDS
+            is_new_burst = (
+                last_seen is None
+                or (now - last_seen) >= TIER1_REPORT_COOLDOWN_SECONDS
+            )
+
+            # Still inside the window since the last log: stay quiet.
+            if last_reported is not None and (now - last_reported) < TIER1_REPORT_COOLDOWN_SECONDS:
+                return None
+
+            meta["lastReportedAt"] = now
+            return "new" if is_new_burst else "ongoing"
 
     def rearm_tier1_reporting(self) -> int:
         """
-        Forget the last-seen times for every blacklist entry, so the next packet
-        from any of them logs immediately instead of waiting out the cooldown.
+        Forget the timers on every blacklist entry, so the next packet from any
+        of them logs immediately instead of waiting out the cooldown.
 
         This is the fast manual path to fresh Tier-1/Tier-3 evidence when you
         can't wait for the cooldown: protection OFF then ON re-arms everything.
@@ -209,8 +224,9 @@ class DaemonState:
         """Body of rearm_tier1_reporting, for callers already holding the lock."""
         count = 0
         for meta in self.blacklist_meta.values():
-            if meta.get("lastSeenAt") is not None:
+            if meta.get("lastSeenAt") is not None or meta.get("lastReportedAt") is not None:
                 meta["lastSeenAt"] = None
+                meta["lastReportedAt"] = None
                 count += 1
         return count
 
@@ -382,20 +398,24 @@ class CaptureEngine(threading.Thread):
                 # Surface this — the visible proof that either this agent's own
                 # earlier detection (Tier 1) or another agent's report relayed
                 # through Bayanihan (Tier 3) is now protecting this machine.
-                # Gated behind should_report_tier1_hit so a sustained flood from
-                # one MAC produces one log line rather than one per dropped
-                # packet, while a genuinely new burst reports again.
-                if self.state.should_report_tier1_hit(src_mac):
+                # classify_tier1_hit rate-limits it to one log per window, so a
+                # sustained flood reports periodically ("ongoing") rather than
+                # once per dropped packet, and a fresh burst reports as "new".
+                hit_kind = self.state.classify_tier1_hit(src_mac)
+                if hit_kind:
                     meta = self.state.blacklist_meta.get(src_mac, {})
                     added_at = meta.get("addedAt", datetime.now().strftime('%H:%M:%S'))
+                    still = "still blocking" if hit_kind == "ongoing" else None
 
                     if meta.get("origin") == "relay":
                         tier_label = "Tier 3"
                         reporter = meta.get("reportedBy") or "another agent"
-                        detail = f"blocked via Bayanihan, reported by {reporter} at {added_at}"
+                        lead = still or "blocked"
+                        detail = f"{lead} via Bayanihan, reported by {reporter} at {added_at}"
                     else:
                         tier_label = "Tier 1"
-                        detail = f"repeat block, first flagged locally at {added_at}"
+                        lead = still or "repeat block"
+                        detail = f"{lead}, first flagged locally at {added_at}"
 
                     event_id = len(self.state.events) + 1
                     threat_event = {
