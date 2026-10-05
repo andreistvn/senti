@@ -444,9 +444,39 @@ def clear_blacklist() -> int:
 # and a host-level answer also captures multichaind and the dashboard server
 # without having to enumerate them.
 #
-# psutil's first cpu_percent() call always returns 0.0 — it needs a prior call to
-# measure against. Prime it at import so the first real reading is meaningful.
-psutil.cpu_percent(None)
+# CPU is derived from successive psutil.cpu_times() samples rather than
+# psutil.cpu_percent(), which rounds to one decimal. Primed at import so the
+# first real reading has something to measure against.
+_RELAY_CPU_MIN_WINDOW = 0.5  # seconds; a shorter window is mostly timer noise
+_relay_cpu_lock = threading.Lock()
+
+
+def _relay_cpu_times() -> tuple:
+    """(monotonic seconds, total CPU seconds, busy CPU seconds) for the host."""
+    t = psutil.cpu_times()
+    # Linux counts guest time inside user, and iowait is idle, not work.
+    total = sum(t) - getattr(t, 'guest', 0.0) - getattr(t, 'guest_nice', 0.0)
+    idle = t.idle + getattr(t, 'iowait', 0.0)
+    return (time.monotonic(), total, total - idle)
+
+
+_relay_cpu_sample = _relay_cpu_times()
+_relay_cpu_last = 0.0
+
+
+def _relay_cpu_percent() -> float:
+    """Host CPU busy share since the previous sample, unrounded."""
+    global _relay_cpu_sample, _relay_cpu_last
+    with _relay_cpu_lock:
+        now, total, busy = _relay_cpu_times()
+        then, total_before, busy_before = _relay_cpu_sample
+        # Two callers share this (the recorder and the summary endpoint); a
+        # call landing right after another reuses that reading.
+        if now - then < _RELAY_CPU_MIN_WINDOW or total <= total_before:
+            return _relay_cpu_last
+        _relay_cpu_sample = (now, total, busy)
+        _relay_cpu_last = min(100.0, max(0.0, (busy - busy_before) / (total - total_before) * 100))
+        return _relay_cpu_last
 
 # When each source was last written to telemetry_readings, keyed by 'relay' or a
 # MAC, plus the scenario label. Agents push telemetry roughly every second; only
@@ -642,7 +672,7 @@ def measure_relay() -> Dict[str, float]:
     in_use = mem.total - mem.available
 
     return {
-        'cpu_percent': round(psutil.cpu_percent(None), 2),
+        'cpu_percent': round(_relay_cpu_percent(), 5),
         'ram_mb': round(in_use / (1024 * 1024), 2),
         'ram_percent': round(mem.percent, 2),
         'ram_total_mb': round(mem.total / (1024 * 1024), 2),

@@ -116,7 +116,7 @@ export default function Dashboard() {
                 </LineChart>
               </ResponsiveContainer>
               <div className="flex items-baseline gap-2 mt-2">
-                <span className="text-[#111] text-xl font-bold tracking-widest">{cpuData[cpuData.length - 1].usage.toFixed(1)}%</span>
+                <span className="text-[#111] text-xl font-bold tracking-widest">{cpuData[cpuData.length - 1].usage.toFixed(5)}%</span>
                 <span className="text-[#00aa55] text-[10px] tracking-widest">LOW IMPACT</span>
               </div>
             </div>

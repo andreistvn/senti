@@ -306,7 +306,7 @@ class DaemonState:
                     "dropped": self.dropped,
                     "passed": self.passed,
                     "blocked": self.blocked,
-                    "cpu": round(self.cpu, 1),
+                    "cpu": round(self.cpu, 5),
                     "memory": self.memory,
                     "memoryMb": round(self.memory_mb, 1),
                     "scenario": self.scenario,
@@ -510,9 +510,10 @@ class TelemetryEngine(threading.Thread):
         self.bayanihan_client = bayanihan_client
         self._stop = threading.Event()
         self._proc = psutil.Process()
-        # psutil's first cpu_percent() call returns 0.0 because it has no earlier
-        # sample to compare against. Prime it so the first real reading counts.
-        self._proc.cpu_percent(None)
+        # CPU is derived from successive (wall clock, CPU seconds) samples rather
+        # than psutil's cpu_percent(), which rounds to one decimal. Same basis:
+        # 100% is one full core. Prime it so the first real reading counts.
+        self._cpu_sample = self._cpu_now()
         # (time, blocked counter) samples spanning SCENARIO_WINDOW_SECONDS.
         self._blocked_samples: deque = deque()
 
@@ -543,13 +544,22 @@ class TelemetryEngine(threading.Thread):
             return "normal"
         return "flooding" if pps >= FLOOD_PPS_THRESHOLD else "poisoning"
 
+    def _cpu_now(self) -> tuple:
+        """(monotonic seconds, CPU seconds this process has consumed so far)."""
+        times = self._proc.cpu_times()
+        return (time.monotonic(), times.user + times.system)
+
     def _measure(self) -> tuple:
         """(cpu_percent, rss_mb, system_ram_percent, process_ram_percent) for this process."""
         with self._proc.oneshot():
-            cpu = self._proc.cpu_percent(None)
+            now, used = self._cpu_now()
             rss_mb = self._proc.memory_info().rss / (1024 * 1024)
             process_percent = self._proc.memory_percent()
-        return (round(cpu, 2), round(rss_mb, 2),
+        then, used_before = self._cpu_sample
+        self._cpu_sample = (now, used)
+        elapsed = now - then
+        cpu = max(0.0, (used - used_before) / elapsed * 100) if elapsed > 0 else 0.0
+        return (round(cpu, 5), round(rss_mb, 2),
                 round(psutil.virtual_memory().percent, 2), round(process_percent, 2))
 
     def run(self) -> None:
