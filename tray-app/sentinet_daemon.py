@@ -31,7 +31,7 @@ import scapy.all as scapy
 from ml_engine import MLEngine
 from bayanihan_client import BayanihanClient
 
-from config import AGENT_VERSION, SIM_TICK_SECONDS, RELAY_URL
+from config import AGENT_VERSION, SIM_TICK_SECONDS, RELAY_URL, TIER1_REPORT_COOLDOWN_SECONDS
 from ipc_protocol import (
     IpcServer,
     MSG_BLACKLIST_UPDATE,
@@ -133,10 +133,9 @@ class DaemonState:
         "relay", proving the intelligence came from another node. `reported_by`
         names which agent originally reported it, for relay-origin entries.
 
-        `tier1Reported` tracks whether a *subsequent* Tier-1 hit on this MAC has
-        already been surfaced once (see CaptureEngine._process_packet) — without
-        it, every dropped packet from an already-blacklisted MAC would otherwise
-        re-report, which is exactly the flood Tier 1 exists to avoid.
+        `lastSeenAt` is the monotonic timestamp of the most recent Tier-1 hit on
+        this MAC; `should_report_tier1_hit` uses it to decide when a block is
+        worth logging again (see that method).
         """
         with self._lock:
             self.blacklist.add(mac)
@@ -148,22 +147,59 @@ class DaemonState:
                     "attackType": attack_type,
                     "confidence": confidence,
                     "reportedBy": reported_by,
-                    "tier1Reported": False,
+                    "lastSeenAt": None,
                 }
 
-    def mark_blacklist_reported(self, mac: str) -> bool:
+    def should_report_tier1_hit(self, mac: str) -> bool:
         """
-        Mark a MAC's repeat/Bayanihan block as surfaced. Returns True only the
-        first time this is called for a given MAC, False on every call after —
-        that's what turns a sustained flood from one already-known MAC into a
-        single log line instead of one per dropped packet.
+        Decide whether this Tier-1 block is worth logging, and record the hit.
+
+        Returns True on the first hit for a blacklist entry, and again whenever
+        at least TIER1_REPORT_COOLDOWN_SECONDS of quiet passed since the last
+        packet from this MAC. Keying off the gap between *packets* rather than a
+        fixed interval since the last report is deliberate: a sustained flood
+        keeps resetting the timer, so it stays at a single log line, while
+        stopping the attack and starting it again reads as a new burst and
+        reports afresh.
         """
+        now = time.monotonic()
         with self._lock:
             meta = self.blacklist_meta.get(mac)
-            if meta is None or meta.get("tier1Reported"):
+            if meta is None:
                 return False
-            meta["tier1Reported"] = True
-            return True
+
+            last_seen = meta.get("lastSeenAt")
+            meta["lastSeenAt"] = now
+
+            if last_seen is None:
+                return True
+            return (now - last_seen) >= TIER1_REPORT_COOLDOWN_SECONDS
+
+    def rearm_tier1_reporting(self) -> int:
+        """
+        Forget the last-seen times for every blacklist entry, so the next packet
+        from any of them logs immediately instead of waiting out the cooldown.
+
+        This is the fast manual path to fresh Tier-1/Tier-3 evidence when you
+        can't wait for the cooldown: protection OFF then ON re-arms everything.
+        The entries themselves are deliberately left in place — the MAC stays
+        blocked throughout, and intelligence learned from peer agents over
+        Bayanihan is not discarded.
+
+        Callers must NOT already hold self._lock (threading.Lock is not
+        reentrant); set_protected re-arms inline for that reason.
+        """
+        with self._lock:
+            return self._rearm_tier1_reporting_locked()
+
+    def _rearm_tier1_reporting_locked(self) -> int:
+        """Body of rearm_tier1_reporting, for callers already holding the lock."""
+        count = 0
+        for meta in self.blacklist_meta.values():
+            if meta.get("lastSeenAt") is not None:
+                meta["lastSeenAt"] = None
+                count += 1
+        return count
 
     def remove_from_blacklist(self, mac: str) -> None:
         with self._lock:
@@ -192,6 +228,13 @@ class DaemonState:
                 return self.protected
             self.protected = value
             self.protected_since = time.time() if value else None
+            # Treat a toggle as the start of a new protection session: re-arm
+            # Tier-1 reporting so the next block from an already-known MAC is
+            # logged right away rather than waiting out the cooldown. Inlined
+            # because self._lock is already held and is not reentrant.
+            rearmed = self._rearm_tier1_reporting_locked()
+        if rearmed:
+            print(f"[DaemonState] Re-armed Tier-1 reporting for {rearmed} blacklisted MAC(s).")
         self._notify()
         return value
 
@@ -310,13 +353,13 @@ class CaptureEngine(threading.Thread):
                     self.state.dropped += 1
                     # Ceasing processing simulates a block.
 
-                # Surface this once per MAC — the visible proof that either this
-                # agent's own earlier detection (Tier 1) or another agent's
-                # report relayed through Bayanihan (Tier 3) is now protecting
-                # this machine. Gated behind mark_blacklist_reported so a
-                # sustained flood from one MAC produces one log line, not one
-                # per dropped packet.
-                if self.state.mark_blacklist_reported(src_mac):
+                # Surface this — the visible proof that either this agent's own
+                # earlier detection (Tier 1) or another agent's report relayed
+                # through Bayanihan (Tier 3) is now protecting this machine.
+                # Gated behind should_report_tier1_hit so a sustained flood from
+                # one MAC produces one log line rather than one per dropped
+                # packet, while a genuinely new burst reports again.
+                if self.state.should_report_tier1_hit(src_mac):
                     meta = self.state.blacklist_meta.get(src_mac, {})
                     added_at = meta.get("addedAt", datetime.now().strftime('%H:%M:%S'))
 
