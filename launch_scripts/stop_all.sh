@@ -50,6 +50,17 @@ pkill -f "sentinet_tray.py"      2>/dev/null
 if pgrep -f "sentinet_daemon.py" >/dev/null 2>&1; then
     echo "  Killing agent daemon (requires sudo)..."
     sudo pkill -f "sentinet_daemon.py"
+    sleep 1
+    # The daemon runs as root, so a declined or failed sudo prompt leaves it
+    # alive — and it reconnects to the next relay with its old state.
+    if pgrep -f "sentinet_daemon.py" >/dev/null 2>&1; then
+        echo "  Agent daemon did not exit — forcing it..."
+        sudo pkill -9 -f "sentinet_daemon.py"
+        sleep 1
+    fi
+    if pgrep -f "sentinet_daemon.py" >/dev/null 2>&1; then
+        echo "  WARNING: agent daemon is STILL running. Run: sudo pkill -9 -f sentinet_daemon.py"
+    fi
 else
     echo "  Agent daemon is not running."
 fi

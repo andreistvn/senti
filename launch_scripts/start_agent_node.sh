@@ -143,6 +143,25 @@ verify_service() {
 # Scapy needs raw socket access, so this one runs under sudo. sudo -b detaches it,
 # which means we can't capture a usable PID — stop_all.sh pkills it by name.
 echo "[2/3] Starting agent daemon (sudo required for Scapy)..."
+
+# A daemon left over from an earlier run keeps its protection state and
+# reconnects to the relay by itself, while the tray talks only to the newest
+# one — so the dashboard shows an agent the tray says is off. Clear it first.
+if pgrep -f "sentinet_daemon.py" >/dev/null 2>&1; then
+    echo "      A previous agent daemon is still running — stopping it first."
+    sudo pkill -f "sentinet_daemon.py"
+    sleep 1
+    # One that has already been asked to stop and stalled ignores a second request.
+    if pgrep -f "sentinet_daemon.py" >/dev/null 2>&1; then
+        sudo pkill -9 -f "sentinet_daemon.py"
+        sleep 1
+    fi
+    if pgrep -f "sentinet_daemon.py" >/dev/null 2>&1; then
+        echo "ERROR: could not stop the previous agent daemon. Run: sudo pkill -9 -f sentinet_daemon.py"
+        exit 1
+    fi
+fi
+
 (
     cd "$ROOT/tray-app" || exit 1
     [ -d venv ] && source venv/bin/activate
