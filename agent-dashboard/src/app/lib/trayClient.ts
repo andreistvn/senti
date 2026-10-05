@@ -31,7 +31,7 @@ export interface TrayStats {
   memoryMb?: number;   // this agent's own RSS in MB (Chapter 3's figure)
   identity?: { hostname: string; ip: string; mac: string };
   blacklist?: { mac: string; addedAt: string; origin: string; attackType: string; confidence: string }[];
-  bayanihan: { contributions: number; usersProtected: number };
+  bayanihan: { contributions: number; usersProtected: number; pending?: number };
   lastThreat: TrayLastThreat | null;
   protected: boolean;
 }

@@ -15,9 +15,11 @@ Implements the contract endpoints for the admin dashboard:
 - PUT /policy — update policy config
 - GET /telemetry/summary — get telemetry + blockchain metrics
 - GET /telemetry/readings — recorded CPU/RAM samples for analysis
+- GET /sop/summary — SentiNet's figures for each Statement-of-the-Problem question
 - GET /analytics/threat-volume — get threat volume history
 """
 
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Cookie
@@ -298,6 +300,22 @@ async def telemetry_readings(
     return {'count': len(rows), 'scenario': scenario, 'readings': rows}
 
 
+@app.get('/sop/summary')
+async def sop_summary(sentinet_admin_session: Optional[str] = Cookie(None)):
+    """
+    What the dashboard's SOP tab shows: mean CPU/RAM per traffic scenario
+    (SOP 1) and Time-to-Block (SOP 3), computed from the recorded data.
+    """
+    if not sentinet_admin_session:
+        raise HTTPException(status_code=401, detail='Not authenticated')
+
+    digital_id = state.validate_session(sentinet_admin_session)
+    if not digital_id:
+        raise HTTPException(status_code=401, detail='Session expired')
+
+    return state.get_sop_summary()
+
+
 @app.get('/blacklist')
 async def list_blacklist(sentinet_admin_session: Optional[str] = Cookie(None)):
     """
@@ -439,6 +457,95 @@ async def disconnect(sid):
     mac_to_sid.pop(mac, None)
     state.remove_agent(mac)
 
+async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str], reporter_name: str) -> Dict[str, Any]:
+    """
+    Record one attack report and fan it out to the rest of the mesh.
+
+    Shared by the live `attack_report` handler and `register_agent`'s backfill
+    of an agent's recent events on (re)connect, so a report an agent could only
+    deliver late still gets the exact same treatment — threat log, ledger
+    mirror (via state.add_threat), blacklist entry, and a broadcast to every
+    other connected agent — as one delivered on time.
+
+    Returns an ack dict. python-socketio sends an async handler's return value
+    back as the ack to the client's `sio.call(...)`, which is what lets the
+    agent-side queue in bayanihan_client.py know a report actually landed here
+    (not just that the socket write didn't throw).
+    """
+    relay_received_ms = time.time() * 1000
+    source_mac = data.get("sourceMac")
+    if not source_mac:
+        return {"status": "error", "detail": "missing sourceMac"}
+
+    attack_type = data.get("attackType", "Anomalous ARP")
+    tier = data.get("tier", "Tier 2")
+    action = data.get("action", "Blocked")
+    confidence = data.get("confidence", "99.9%")
+    detail = data.get("detail")
+    client_event_id = data.get("clientEventId")
+
+    try:
+        threat_dict = state.add_threat(
+            source_mac, attack_type, tier, action, confidence,
+            detail=detail, client_event_id=client_event_id,
+        )
+    except Exception as exc:
+        print(f"[WebSocket] Failed to record attack report from {reporter_name}: {exc}")
+        return {"status": "error", "detail": str(exc)}
+
+    if not threat_dict.get('isNew', True):
+        # Already have this exact report (agent retry, or a backfill re-offering
+        # something that was in fact delivered live). Nothing further to do —
+        # the blacklist entry and broadcast already happened the first time.
+        return {"status": "ok", "id": threat_dict["id"], "duplicate": True}
+
+    # Record it on the network-wide blacklist so late-joining agents can be
+    # caught up later. Returns False if another agent already reported it.
+    is_new_blacklist = state.add_to_blacklist(
+        source_mac,
+        reported_by=reporter_name,
+        attack_type=attack_type,
+        confidence=confidence,
+        tier=tier,
+    )
+
+    # A Tier-2 report carrying its detection time is the start of a Time-to-Block
+    # measurement (Chapter 3, Equation 7). Record t_detected and tag the broadcast
+    # with the event id, so each agent that enforces it can report t_enforced
+    # back against the same detection. Repeat-block and Bayanihan reports carry
+    # no detection time and are left out — they are not first detections.
+    detected_at_ms = data.get("detectedAtMs")
+    ttb_event_id = None
+    if tier == "Tier 2" and client_event_id and isinstance(detected_at_ms, (int, float)):
+        state.record_ttb_detection(
+            event_id=client_event_id,
+            attacker_mac=source_mac,
+            detected_by=state.agent_name_for(reporter_name) or reporter_name,
+            t_detected_ms=detected_at_ms,
+            relay_received_ms=relay_received_ms,
+        )
+        ttb_event_id = client_event_id
+
+    # Broadcast to all other connected agents so they update their blacklists.
+    # skip_sid is None for a backfilled event (there is no "sid that just sent
+    # this" — it arrived bundled in register_agent), which broadcasts to
+    # everyone including the reconnecting agent; harmless, it already has it.
+    print(f"[WebSocket] Broadcasting blacklist_update for {source_mac}"
+          f"{'' if is_new_blacklist else ' (already known)'}")
+    update = {
+        "mac": source_mac,
+        "attackType": attack_type,
+        "confidence": confidence,
+        "tier": tier,
+        "reportedBy": reporter_name,
+    }
+    if ttb_event_id:
+        update["eventId"] = ttb_event_id
+    await sio.emit("blacklist_update", update, skip_sid=reporter_sid)
+
+    return {"status": "ok", "id": threat_dict["id"], "duplicate": False}
+
+
 @sio.event
 async def register_agent(sid, data):
     print(f"[WebSocket] Agent registered: {data.get('name')} from {sid}")
@@ -457,6 +564,22 @@ async def register_agent(sid, data):
         await sio.emit("blacklist_sync", {"entries": entries}, to=sid)
         print(f"[WebSocket] Sent {len(entries)} blacklist entries to {data.get('name')}")
 
+    # Catch up on anything this agent detected but couldn't deliver earlier —
+    # e.g. the relay was down or restarting at the moment of detection. The
+    # agent's own BayanihanClient queue (tray-app/bayanihan_client.py) already
+    # retries every report until acknowledged, so in the common case this is a
+    # no-op; it's the second, independent path for the cases that queue itself
+    # might have missed (bug, or a report logged before this fix existed).
+    reporter = data.get("name") or mac or "unknown"
+    recent_events = data.get("recentEvents") or []
+    backfilled = 0
+    for event in recent_events:
+        result = await _ingest_attack_report(event, reporter_sid=None, reporter_name=reporter)
+        if result.get("status") == "ok" and not result.get("duplicate"):
+            backfilled += 1
+    if backfilled:
+        print(f"[WebSocket] Backfilled {backfilled} missed threat report(s) from {data.get('name')}")
+
 @sio.event
 async def telemetry_report(sid, data):
     mac = data.get("mac")
@@ -465,55 +588,54 @@ async def telemetry_report(sid, data):
     ram_mb = data.get("ramMb")               # this agent's RSS in MB — the paper's figure
     protected = data.get("protected")
     agent_state = data.get("state")
+    scenario = data.get("scenario")          # normal | poisoning | flooding, as the agent sees it
     if mac:
         state.update_agent_telemetry(
-            mac, cpu, ram, agent_state, ram_mb=ram_mb, protected=protected
+            mac, cpu, ram, agent_state, ram_mb=ram_mb, protected=protected,
+            scenario=scenario,
         )
+
+@sio.event
+async def blacklist_enforced(sid, data):
+    """
+    An agent reporting that it wrote a broadcast MAC into its Tier-1 blacklist.
+
+    Expected data: {"eventId": "...", "mac": "...", "agentMac": "...",
+                     "agentName": "...", "enforcedAtMs": 1234567890123}
+
+    This is t_enforced for the detection identified by eventId; paired with that
+    detection's t_detected it gives one Time-to-Block measurement.
+    """
+    relay_acked_ms = time.time() * 1000
+    event_id = data.get("eventId")
+    enforced_at_ms = data.get("enforcedAtMs")
+    agent_mac = data.get("agentMac") or sid_to_mac.get(sid)
+    if not event_id or not agent_mac or not isinstance(enforced_at_ms, (int, float)):
+        return
+
+    recorded = state.record_ttb_enforcement(
+        event_id=event_id,
+        enforced_by=data.get("agentName") or agent_mac,
+        enforced_by_mac=agent_mac,
+        t_enforced_ms=enforced_at_ms,
+        relay_acked_ms=relay_acked_ms,
+    )
+    if recorded:
+        print(f"[WebSocket] {data.get('agentName') or agent_mac} enforced block of {data.get('mac')}")
 
 @sio.event
 async def attack_report(sid, data):
     """
     Handle incoming Attack Report from a SentiNet agent.
-    Expected data: {"sourceMac": "...", "attackType": "...", "tier": "...", "action": "...", "confidence": "..."}
+    Expected data: {"sourceMac": "...", "attackType": "...", "tier": "...", "action": "...",
+                     "confidence": "...", "clientEventId": "..."}
+
+    Returns an ack dict — the agent's BayanihanClient uses `sio.call(...)` and
+    only considers the report delivered once this comes back with status "ok".
     """
     print(f"[WebSocket] Received attack report from {sid}: {data}")
-    
-    source_mac = data.get("sourceMac")
-    attack_type = data.get("attackType", "Anomalous ARP")
-    tier = data.get("tier", "Tier 2")
-    action = data.get("action", "Blocked")
-    confidence = data.get("confidence", "99.9%")
-    detail = data.get("detail")
-
-    if source_mac:
-        # Save to threat log
-        state.add_threat(source_mac, attack_type, tier, action, confidence, detail=detail)
-
-        # Record it on the network-wide blacklist so late-joining agents can be
-        # caught up later. Returns False if another agent already reported it.
-        reporter = data.get("name") or sid_to_mac.get(sid) or "unknown"
-        is_new = state.add_to_blacklist(
-            source_mac,
-            reported_by=reporter,
-            attack_type=attack_type,
-            confidence=confidence,
-            tier=tier,
-        )
-
-        # Broadcast to all other connected agents so they update their blacklists
-        print(f"[WebSocket] Broadcasting blacklist_update for {source_mac}"
-              f"{'' if is_new else ' (already known)'}")
-        await sio.emit(
-            "blacklist_update",
-            {
-                "mac": source_mac,
-                "attackType": attack_type,
-                "confidence": confidence,
-                "tier": tier,
-                "reportedBy": reporter,
-            },
-            skip_sid=sid,
-        )
+    reporter = data.get("name") or sid_to_mac.get(sid) or "unknown"
+    return await _ingest_attack_report(data, reporter_sid=sid, reporter_name=reporter)
 
 
 if __name__ == '__main__':

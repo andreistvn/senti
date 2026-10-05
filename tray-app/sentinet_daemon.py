@@ -21,6 +21,7 @@ import signal
 import sys
 import threading
 import time
+import uuid
 from collections import deque
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
@@ -98,6 +99,9 @@ class DaemonState:
         self.cpu: float = 4.0
         self.memory: int = 84          # system-wide percent, for the gauge
         self.memory_mb: float = 0.0    # this process's RSS in MB (what the paper wants)
+        # Traffic scenario this agent is currently experiencing — "normal",
+        # "poisoning" or "flooding". Set by TelemetryEngine; labels each reading.
+        self.scenario: str = "normal"
 
         # Bayanihan
         self.sig_contributions: int = 0
@@ -123,9 +127,9 @@ class DaemonState:
 
     def add_to_blacklist(self, mac: str, origin: str = "local",
                          attack_type: str = "Unknown", confidence: str = "N/A",
-                         reported_by: Optional[str] = None) -> None:
+                         reported_by: Optional[str] = None) -> bool:
         """
-        Add a MAC to the Tier-1 filter.
+        Add a MAC to the Tier-1 filter. Returns True if it was not already there.
 
         `origin` records whether this node detected it itself or received it from
         the relay. That distinction is the visible evidence of the Bayanihan
@@ -138,6 +142,7 @@ class DaemonState:
         worth logging again (see that method).
         """
         with self._lock:
+            is_new = mac not in self.blacklist
             self.blacklist.add(mac)
             if mac not in self.blacklist_meta:
                 self.blacklist_meta[mac] = {
@@ -149,6 +154,7 @@ class DaemonState:
                     "reportedBy": reported_by,
                     "lastSeenAt": None,
                 }
+            return is_new
 
     def should_report_tier1_hit(self, mac: str) -> bool:
         """
@@ -211,6 +217,18 @@ class DaemonState:
         with self._lock:
             return mac in self.blacklist
 
+    def events_tail(self, n: int = 20) -> List[Dict[str, Any]]:
+        """
+        The `n` most recent local detections, for BayanihanClient to offer the
+        relay as a register_agent backfill. This is independent of whether each
+        one's report was actually delivered — it's a cross-check against this
+        agent's own display log, catching the case where a detection somehow
+        never made it into the pending-report queue at all (a bug, or one
+        logged before that queue existed), not just a slow/retrying delivery.
+        """
+        with self._lock:
+            return list(self.events)[:n]
+
     def on_change(self, callback):
         self._on_change.append(callback)
 
@@ -267,6 +285,7 @@ class DaemonState:
                     "cpu": round(self.cpu, 1),
                     "memory": self.memory,
                     "memoryMb": round(self.memory_mb, 1),
+                    "scenario": self.scenario,
                     "bayanihan": {
                         "contributions": self.sig_contributions,
                     },
@@ -374,6 +393,9 @@ class CaptureEngine(threading.Thread):
                     event_id = len(self.state.events) + 1
                     threat_event = {
                         "id": event_id,
+                        # Stable across retries/backfills — see bayanihan_client.py
+                        # and admin-backend state.add_threat()'s dedupe on it.
+                        "clientEventId": str(uuid.uuid4()),
                         "timestamp": datetime.now().strftime('%H:%M:%S'),
                         "sourceMac": src_mac,
                         "attackType": meta.get("attackType", "Unknown"),
@@ -398,18 +420,24 @@ class CaptureEngine(threading.Thread):
             score = self.ml_engine.process_packet(src_mac, op, src_ip, dst_ip)
             
             if score >= 0.50:
+                # t_detected in Chapter 3's Time-to-Block formula: the moment
+                # Tier 2 first classifies this MAC as malicious. Taken before
+                # anything else so logging and bookkeeping don't inflate it.
+                detected_at_ms = int(time.time() * 1000)
                 print(f"[Tier 2] THREAT DETECTED: {src_mac} (Score: {score:.2f})")
                 # Generate Attack Report format
                 event_id = len(self.state.events) + 1
                 now = datetime.now()
                 threat_event = {
                     "id": event_id,
+                    "clientEventId": str(uuid.uuid4()),
                     "timestamp": now.strftime('%H:%M:%S'),
                     "sourceMac": src_mac,
                     "attackType": "ARP Spoofing" if score > 0.8 else "Anomalous ARP",
                     "tier": "Tier 2",
                     "action": "Blocked",
-                    "confidence": f"{score*100:.1f}%"
+                    "confidence": f"{score*100:.1f}%",
+                    "detectedAtMs": detected_at_ms,
                 }
 
                 self.state.add_to_blacklist(
@@ -457,9 +485,33 @@ class TelemetryEngine(threading.Thread):
         # psutil's first cpu_percent() call returns 0.0 because it has no earlier
         # sample to compare against. Prime it so the first real reading counts.
         self._proc.cpu_percent(None)
+        # (time, blocked counter) samples spanning SCENARIO_WINDOW_SECONDS.
+        self._blocked_samples: deque = deque()
 
     def stop(self) -> None:
         self._stop.set()
+
+    def _classify_scenario(self) -> str:
+        """
+        Which of the paper's three traffic scenarios this agent is in right now.
+
+        Judged from the rate at which Tier 1 is dropping attack packets, averaged
+        over a short window so a single stray drop or a momentary gap in a flood
+        doesn't flip the label back and forth.
+        """
+        now = time.time()
+        with self.state._lock:
+            blocked = self.state.blocked
+        self._blocked_samples.append((now, blocked))
+        while len(self._blocked_samples) > 2 and (now - self._blocked_samples[0][0]) > SCENARIO_WINDOW_SECONDS:
+            self._blocked_samples.popleft()
+
+        t0, b0 = self._blocked_samples[0]
+        elapsed = now - t0
+        if elapsed <= 0 or blocked <= b0:
+            return "normal"
+        pps = (blocked - b0) / elapsed
+        return "flooding" if pps >= FLOOD_PPS_THRESHOLD else "poisoning"
 
     def _measure(self) -> tuple:
         """(cpu_percent, rss_mb, system_ram_percent) for this process."""
@@ -474,6 +526,7 @@ class TelemetryEngine(threading.Thread):
 
             is_protected = self.state.is_protected()
             cpu, ram_mb, ram_percent = self._measure()
+            scenario = self._classify_scenario()
 
             # Protection OFF used to report a fabricated 0 for both. The relay now
             # records these readings as research data, so send the real numbers and
@@ -483,6 +536,7 @@ class TelemetryEngine(threading.Thread):
                 self.state.cpu = cpu
                 self.state.memory = ram_percent
                 self.state.memory_mb = ram_mb
+                self.state.scenario = scenario
 
             self.bayanihan_client.send_telemetry(
                 cpu,
@@ -490,6 +544,7 @@ class TelemetryEngine(threading.Thread):
                 "PROTECTED" if is_protected else "UNPROTECTED",
                 ram_mb=ram_mb,
                 protected=is_protected,
+                scenario=scenario,
             )
 
 
@@ -530,12 +585,28 @@ class SentiNetDaemon:
         self.bayanihan_client = BayanihanClient(
             relay_url=RELAY_URL,
             on_blacklist_update=self.state.add_to_blacklist,
-            agent_info=agent_info
+            agent_info=agent_info,
+            recent_events_provider=lambda: self.state.events_tail(20),
         )
         self.capture = CaptureEngine(self.state, self.ml_engine, self.bayanihan_client)
         self.telemetry = TelemetryEngine(self.state, self.bayanihan_client)
         self.ipc = IpcServer(on_message=self._handle_tray_message)
         self._stop = threading.Event()
+
+    def _snapshot_for_tray(self) -> Dict[str, Any]:
+        """
+        Full state snapshot, plus the Bayanihan pending-report count.
+
+        That count lives on self.bayanihan_client, not self.state — DaemonState
+        has no reference to it, by design (same separation as sig_contributions,
+        which the capture engine increments directly instead). Merged in here so
+        both the tray mirror and the agent dashboard can show "N reports not yet
+        acknowledged by the relay" instead of that gap being invisible, which is
+        exactly what let it go unnoticed before.
+        """
+        snapshot = self.state.snapshot()
+        snapshot["stats"]["bayanihan"]["pending"] = self.bayanihan_client.pending_count()
+        return snapshot
 
     def _handle_tray_message(self, msg_type: str, data: Dict[str, Any]) -> None:
         """Handle messages received from the unprivileged tray process."""
@@ -544,7 +615,7 @@ class SentiNetDaemon:
             self.bayanihan_client.set_enabled(new_val)
             self.ipc.broadcast(MSG_TOGGLE_ACK, {"protected": new_val})
             # Also push a full state update so the tray mirrors immediately.
-            self.ipc.broadcast(MSG_STATE_UPDATE, self.state.snapshot())
+            self.ipc.broadcast(MSG_STATE_UPDATE, self._snapshot_for_tray())
 
     def _broadcast_loop(self) -> None:
         """Periodically push full state snapshots to all connected trays."""
@@ -553,7 +624,7 @@ class SentiNetDaemon:
             if self._stop.is_set():
                 break
             try:
-                self.ipc.broadcast(MSG_STATE_UPDATE, self.state.snapshot())
+                self.ipc.broadcast(MSG_STATE_UPDATE, self._snapshot_for_tray())
                 print("[BroadcastLoop] Tick", flush=True)
             except Exception as e:
                 print(f"[BroadcastLoop] Failed: {e}")

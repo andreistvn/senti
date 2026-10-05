@@ -22,6 +22,18 @@ ADMIN_CORS_ORIGINS = [
 # Session/auth
 SESSION_TIMEOUT_SECONDS = 3600
 
+# Agents list (GET /agents, the "Protected Devices" panel). An agent's row is
+# refreshed on every register_agent/telemetry_report it sends (roughly once a
+# second while connected — see tray-app TelemetryEngine's SIM_TICK_SECONDS).
+# get_agents() prunes any row whose last heartbeat is older than this before
+# returning, rather than relying solely on the Socket.IO `disconnect` event to
+# remove it: that event can only fire for a connection *this* relay process
+# itself is holding, so a hard-killed agent (stop_all.bat's taskkill /F) or —
+# especially — a relay restart (which always clears in-memory connection state
+# but never touched the persisted agents table) can otherwise leave a ghost
+# row with no automatic expiry at all.
+AGENT_STALE_SECONDS = float(os.getenv('AGENT_STALE_SECONDS', '12'))
+
 # ─── Resource telemetry (Chapter 3: "Resource Consumption") ─────────────────
 # The paper defines resource consumption as "CPU usage (%) and RAM consumption
 # (MB) tracked at one-minute intervals". The dashboards refresh far faster than

@@ -243,6 +243,46 @@ export async function signOutAdmin() {
   }
 }
 
+export type SopScenario = 'normal' | 'poisoning' | 'flooding';
+
+export interface SopEfficiencyScenario {
+  n: number;
+  meanCpu: number | null;
+  varianceCpu: number | null;
+  meanRamMb: number | null;
+  varianceRamMb: number | null;
+  live: boolean;
+}
+
+export interface SopTtbTrial {
+  attackerMac: string;
+  detectedBy: string;
+  enforcedBy: string | null;
+  tDetectedMs: number;
+  tEnforcedMs: number | null;
+  ttbMs: number | null;
+  relayTtbMs: number | null;
+}
+
+export interface SopSummary {
+  efficiency: {
+    scenarios: Record<SopScenario, SopEfficiencyScenario>;
+    sampleIntervalSeconds: number;
+  };
+  timeToBlock: {
+    latest: SopTtbTrial | null;
+    n: number;
+    meanTtbMs: number | null;
+    varianceTtbMs: number | null;
+  };
+}
+
+// Null when the backend is unreachable — the SOP tab then shows its empty state
+// rather than invented figures.
+export async function getSopSummary() {
+  return requestWithFallback<SopSummary | null>('/sop/summary', () => null);
+}
+
 export async function getAdminDashboardSeed() {
   const fallback = cloneSeed();
   const [agents, logs, ledger, blacklistResp, summary, threatHistory, policyConfig] = await Promise.all([

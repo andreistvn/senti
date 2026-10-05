@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { Radio, Sliders, Zap, CheckCircle, Cpu, Server } from 'lucide-react';
 
 export interface PolicyConfig {
   mlThreshold: number;
@@ -103,7 +102,6 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
         {/* Policy configurator */}
         <section className="border border-[#cccccc] bg-white flex flex-col">
           <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
-            <Sliders className="w-5 h-5" />
             Global Policy Configurator
           </div>
           <div className="flex-1 p-5 flex flex-col gap-4 font-['JetBrains_Mono',_monospace] text-sm">
@@ -151,15 +149,15 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
               className={`flex items-center gap-2 px-5 py-3 text-xs font-bold uppercase tracking-widest border transition ${changed.length > 0 && !broadcastPending ? 'bg-[#0d1b3e] border-[#0d1b3e] text-white hover:bg-[#102245]' : 'bg-[#f9fafb] border-[#E2E8F0] text-[#94A3B8] cursor-not-allowed'}`}
             >
               {broadcastPending ? (
-                <><Radio className="w-4 h-4 animate-ping" />Broadcasting...</>
+                <>Broadcasting...</>
               ) : (
-                <><Zap className="w-4 h-4" />Broadcast to All Agents</>
+                <>Broadcast to All Agents</>
               )}
             </button>
           </div>
           {lastBroadcast && (
             <div className="border-t-2 border-[#16A34A] bg-[#F0FDF4] p-3 flex items-center gap-2 text-[#16A34A] text-xs font-bold uppercase tracking-widest">
-              <CheckCircle className="w-4 h-4" />Policy broadcast confirmed at {lastBroadcast}
+              Policy broadcast confirmed at {lastBroadcast}
             </div>
           )}
         </section>
@@ -167,7 +165,6 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
         {/* Active Node Topology & Health Map */}
         <section className="border border-[#cccccc] bg-white flex flex-col">
           <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
-            <Server className="w-5 h-5" />
             Active Node Topology & Health Map
             <span className="ml-auto font-['JetBrains_Mono',_monospace] text-[#16A34A] text-xs">
               {agents.length} CONNECTED
@@ -191,7 +188,7 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <div className="flex justify-between text-[9px] font-bold uppercase mb-1">
-                        <span className="flex items-center gap-1"><Cpu className="w-3 h-3" />CPU</span>
+                        <span className="flex items-center gap-1">CPU</span>
                         <span className={`font-['JetBrains_Mono',_monospace] ${cpuHigh ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>{agent.cpu}%</span>
                       </div>
                       <div className="h-2 border border-[#e2e8f0] bg-white">
@@ -214,7 +211,7 @@ export default function PolicyTab({ config, agents, onBroadcast }: Props) {
                   </div>
                   {cpuHigh && (
                     <div className="mt-2 text-[9px] font-bold uppercase tracking-widest text-[#DC2626] flex items-center gap-1">
-                      ⚠ CPU BOTTLENECK — HIGH LOCALIZED TRAFFIC
+                      CPU BOTTLENECK — HIGH LOCALIZED TRAFFIC
                     </div>
                   )}
                 </div>

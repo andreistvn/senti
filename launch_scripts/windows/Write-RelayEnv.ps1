@@ -154,7 +154,9 @@ if (-not (Test-Path $envExample)) {
     exit 1
 }
 
+$preservedStreamName = ''
 if (Test-Path $envFile) {
+    $preservedStreamName = Get-ConfValue -Lines (Get-Content $envFile) -Key 'MULTICHAIN_STREAM_NAME'
     Copy-Item $envFile "$envFile.bak" -Force
     Write-Host '      Existing .env backed up to .env.bak'
 }
@@ -173,6 +175,14 @@ $updates = [ordered]@{
     'MULTICHAIN_RPC_USER'     = $rpcUser
     'MULTICHAIN_RPC_PASSWORD' = $rpcPassword
     'ADMIN_CORS_ORIGINS'      = $corsOrigins
+}
+
+# Copy-Item above resets the whole file to .env.example's defaults, which would
+# silently drop a custom MULTICHAIN_STREAM_NAME (e.g. a demo stream) even though
+# this script never otherwise touches it. Carry the previous value forward so it
+# actually survives a relaunch, matching the behaviour this script documents.
+if (-not [string]::IsNullOrWhiteSpace($preservedStreamName)) {
+    $updates['MULTICHAIN_STREAM_NAME'] = $preservedStreamName
 }
 
 $lines = @(Get-Content $envFile)

@@ -1,10 +1,5 @@
 import React from 'react';
-import {
-  Shield, Radio, Clock, Activity, Database,
-  TrendingUp, Users, Award
-} from 'lucide-react';
 import { LineChart, Line, ResponsiveContainer } from 'recharts';
-import { Power } from 'lucide-react';
 import { useDashboardState } from '../dashboard/useDashboardState';
 
 export default function Dashboard() {
@@ -20,6 +15,7 @@ export default function Dashboard() {
     eIdentity,
     eBlacklist,
     eSigContrib,
+    eReportsPending,
     eLastThreat,
     eLogs,
     detectionLogsContainerRef,
@@ -39,12 +35,7 @@ export default function Dashboard() {
           <span className="text-[#8899bb] tracking-wider">
             {eIdentity.ip || '—'} / {eIdentity.mac || '—'}
           </span>
-          {live ? (
-            <span className="flex items-center gap-2 text-[#00ff88]">
-              <span className="w-2 h-2 rounded-full bg-[#00ff88] animate-pulse inline-block" />
-              TRAY CONNECTED
-            </span>
-          ) : (
+          {!live && (
             <span className="flex items-center gap-2 text-[#f59e0b]" title="Tray daemon not detected — showing simulated data">
               <span className="w-2 h-2 rounded-full bg-[#f59e0b] animate-pulse inline-block" />
               MOCK MODE
@@ -58,13 +49,12 @@ export default function Dashboard() {
         {/* Row 1: Status Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader icon={<Shield className="w-4 h-4 text-[#0d1b3e]" strokeWidth={2} />} title="Protection Status" />
+            <PanelHeader title="Protection Status" />
             <div className="p-5">
               <div
                 className="inline-flex items-center gap-2 px-5 py-2.5 mb-3"
                 style={{ background: eProtected ? '#00aa55' : '#3a5070' }}
               >
-                <ShieldCheckIcon />
                 <span className="text-white text-sm tracking-[0.2em] font-bold">
                   {eProtected ? 'PROTECTED' : 'UNPROTECTED'}
                 </span>
@@ -81,7 +71,6 @@ export default function Dashboard() {
                       : 'border-[#00aa55] text-[#00aa55] hover:bg-green-50'
                   }`}
                 >
-                  <Power className="w-3 h-3" />
                   {eProtected ? 'TURN OFF PROTECTION' : 'TURN ON PROTECTION'}
                 </button>
               )}
@@ -89,7 +78,7 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader icon={<Radio className="w-4 h-4 text-[#0d1b3e]" strokeWidth={2} />} title="Relay Connection" />
+            <PanelHeader title="Relay Connection" />
             <div className="p-5">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-2.5 h-2.5 shrink-0" style={{ background: eProtected ? '#00aa55' : '#3a5070' }} />
@@ -104,7 +93,7 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader icon={<Clock className="w-4 h-4 text-[#c0392b]" strokeWidth={2} />} title="Last Detected Threat" />
+            <PanelHeader title="Last Detected Threat" />
             <div className="p-5">
               <p className="text-[#111] text-sm tracking-widest font-bold mb-3">
                 {eLastThreat ? eLastThreat.timestamp : 'NONE DETECTED'}
@@ -119,7 +108,7 @@ export default function Dashboard() {
         {/* Row 2: Telemetry */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader icon={<Activity className="w-4 h-4 text-[#1a4fd6]" strokeWidth={2} />} title="CPU Load (Tier-1 Efficiency)" />
+            <PanelHeader title="CPU Load (Tier-1 Efficiency)" />
             <div className="p-5">
               <ResponsiveContainer width="100%" height={80}>
                 <LineChart data={cpuData}>
@@ -134,7 +123,7 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader icon={<Database className="w-4 h-4 text-[#1a4fd6]" strokeWidth={2} />} title="System RAM Usage" />
+            <PanelHeader title="System RAM Usage" />
             <div className="p-5 flex flex-col items-center">
               <div className="relative w-28 h-28">
                 <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
@@ -156,7 +145,7 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader icon={<TrendingUp className="w-4 h-4 text-[#1a4fd6]" strokeWidth={2} />} title="Traffic Throughput (PPS)" />
+            <PanelHeader title="Traffic Throughput (PPS)" />
             <div className="p-5 space-y-3">
               {[
                 { label: 'INSPECTED', value: eInspected.toLocaleString(), pct: 100, color: '#1a4fd6', textColor: '#111', hideBar: true },
@@ -225,11 +214,13 @@ export default function Dashboard() {
             <div className="bg-white border border-[#cccccc] flex flex-col flex-1 min-h-0">
               <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-[#cccccc] bg-[#0d1b3e] shrink-0">
                 <div className="flex items-center gap-2">
-                  <Award className="w-3.5 h-3.5 text-[#f59e0b]" strokeWidth={2} />
                   <span className="text-white text-[10px] tracking-widest uppercase font-bold">Tier-1 Blacklist</span>
                 </div>
                 <span className="text-[#8899bb] text-[10px] tracking-widest">
                   {eBlacklist.length} BLOCKED &middot; {eSigContrib} SHARED
+                  {eReportsPending > 0 && (
+                    <span className="text-[#f59e0b]"> &middot; {eReportsPending} PENDING</span>
+                  )}
                 </span>
               </div>
 
@@ -276,20 +267,10 @@ export default function Dashboard() {
   );
 }
 
-function PanelHeader({ icon, title }: { icon: React.ReactNode; title: string }) {
+function PanelHeader({ title }: { title: string }) {
   return (
     <div className="flex items-center gap-2 px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5]">
-      {icon}
       <span className="text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold">{title}</span>
     </div>
-  );
-}
-
-function ShieldCheckIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      <polyline points="9 12 11 14 15 10" />
-    </svg>
   );
 }
