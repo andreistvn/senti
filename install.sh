@@ -23,7 +23,7 @@ echo "==========================================="
 
 echo "[1/4] Installing system dependencies..."
 apt-get update
-apt-get install -y python3-venv npm gir1.2-appindicator3-0.1
+apt-get install -y python3-venv npm gir1.2-appindicator3-0.1 nftables
 
 setup_python_venv() {
     local dir=$1

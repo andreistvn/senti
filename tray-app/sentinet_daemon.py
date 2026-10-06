@@ -31,11 +31,13 @@ import scapy.all as scapy
 
 from ml_engine import MLEngine
 from bayanihan_client import BayanihanClient
+from enforcer import Enforcer, normalise_mac
 
 from config import (
     AGENT_VERSION,
     SIM_TICK_SECONDS,
     RELAY_URL,
+    CAPTURE_IFACE,
     TIER1_REPORT_COOLDOWN_SECONDS,
     FLOOD_PPS_THRESHOLD,
     POISON_PPS_THRESHOLD,
@@ -123,6 +125,14 @@ class DaemonState:
         # blacklist_meta carries the display detail in parallel.
         self.blacklist: Set[str] = set()
         self.blacklist_meta: Dict[str, Dict[str, str]] = {}
+        # Turns a blacklist entry into a real kernel-level drop where the
+        # platform allows it (see enforcer.py). Set by SentiNetDaemon.
+        self.enforcer: Optional[Enforcer] = None
+        # MACs that must never be blacklisted whatever the model or another
+        # agent says: this host's own, and its gateway's. Blocking the gateway
+        # would cut this machine off the network — including from the relay.
+        self.never_block: Set[str] = set()
+        self._never_block_logged: Set[str] = set()
 
         # This node's own identity, filled in by SentiNetDaemon once detected.
         # The agent dashboard header used to print a hardcoded address.
@@ -149,7 +159,13 @@ class DaemonState:
         recent Tier-1 hit and the most recent logged report for this MAC;
         `classify_tier1_hit` uses them to decide when a block is worth logging
         again, and whether it reads as a new burst or an ongoing one.
+
+        By the time this returns, the kernel is dropping the MAC's ARP frames
+        (where enforcement is available) — so a caller that timestamps
+        "enforced" afterwards is timestamping a block that is really in place.
         """
+        if self.is_never_block(mac, source=origin):
+            return False
         with self._lock:
             is_new = mac not in self.blacklist
             self.blacklist.add(mac)
@@ -164,7 +180,23 @@ class DaemonState:
                     "lastSeenAt": None,
                     "lastReportedAt": None,
                 }
-            return is_new
+        # Outside the state lock: this runs a system command.
+        if is_new and self.enforcer is not None:
+            self.enforcer.block(mac)
+        return is_new
+
+    def is_never_block(self, mac: str, source: str = "local") -> bool:
+        """True for a MAC that is exempt from blacklisting; logs the first refusal."""
+        key = normalise_mac(mac)
+        with self._lock:
+            if key is None or key not in self.never_block:
+                return False
+            first = key not in self._never_block_logged
+            self._never_block_logged.add(key)
+        if first:
+            print(f"[DaemonState] Refusing to blacklist {mac} ({source}): it is this host "
+                  f"or its gateway. Check for a false positive.", flush=True)
+        return True
 
     def classify_tier1_hit(self, mac: str) -> Optional[str]:
         """
@@ -235,6 +267,8 @@ class DaemonState:
         with self._lock:
             self.blacklist.discard(mac)
             self.blacklist_meta.pop(mac, None)
+        if self.enforcer is not None:
+            self.enforcer.unblock(mac)
 
     def is_blacklisted(self, mac: str) -> bool:
         # thread-safe enough for check, but using lock for strictness
@@ -277,6 +311,13 @@ class DaemonState:
             rearmed = self._rearm_tier1_reporting_locked()
         if rearmed:
             print(f"[DaemonState] Re-armed Tier-1 reporting for {rearmed} blacklisted MAC(s).")
+        # Kernel rules exist only while protection is on, so turning it off
+        # really does stop all blocking.
+        if self.enforcer is not None:
+            if value:
+                self.enforcer.start()
+            else:
+                self.enforcer.stop()
         self._notify()
         return value
 
@@ -300,6 +341,9 @@ class DaemonState:
                     "relay": "online" if self.protected else "offline",
                     "version": AGENT_VERSION,
                     "since": since,
+                    # "kernel" when blacklisted MACs are really dropped,
+                    # "simulated" when they are only counted.
+                    "enforcement": self.enforcer.mode if self.enforcer else "simulated",
                 },
                 "stats": {
                     "inspected": self.inspected,
@@ -366,6 +410,7 @@ class CaptureEngine(threading.Thread):
             try:
                 # We filter for ARP since this is an ARP-spoofing IDPS proof-of-concept
                 scapy.sniff(
+                    **({"iface": CAPTURE_IFACE} if CAPTURE_IFACE else {}),
                     filter="arp",
                     prn=self._process_packet,
                     store=False,
@@ -394,7 +439,9 @@ class CaptureEngine(threading.Thread):
                 with self.state._lock:
                     self.state.blocked += 1
                     self.state.dropped += 1
-                    # Ceasing processing simulates a block.
+                    # On Linux the kernel has already discarded this frame
+                    # (enforcer.py) and this is the sniffer's copy of it; on
+                    # other platforms ceasing processing only simulates a block.
 
                 # Surface this — the visible proof that either this agent's own
                 # earlier detection (Tier 1) or another agent's report relayed
@@ -447,6 +494,9 @@ class CaptureEngine(threading.Thread):
             # Tier 2: Stateful ML Engine evaluation
             score = self.ml_engine.process_packet(src_mac, op, src_ip, dst_ip)
             
+            if score >= 0.50 and self.state.is_never_block(src_mac, source=f"Tier 2 score {score:.2f}"):
+                return
+
             if score >= 0.50:
                 # t_detected in Chapter 3's Time-to-Block formula: the moment
                 # Tier 2 first classifies this MAC as malicious. Taken before
@@ -624,6 +674,9 @@ class SentiNetDaemon:
         self.state.hostname = hostname
         self.state.ip = ip_addr
         self.state.mac = mac_addr
+        self.state.enforcer = Enforcer(iface=self._capture_iface())
+        print(f"[Enforcer] Mode: {self.state.enforcer.mode} ({self.state.enforcer.reason})")
+        self._refresh_never_block()
         self.ml_engine = MLEngine()
         # SOP 2's confusion matrix, computed here and carried to the relay in
         # register_agent. Milliseconds of work, once per start-up.
@@ -641,6 +694,44 @@ class SentiNetDaemon:
         self.telemetry = TelemetryEngine(self.state, self.bayanihan_client)
         self.ipc = IpcServer(on_message=self._handle_tray_message)
         self._stop = threading.Event()
+
+    @staticmethod
+    def _capture_iface() -> Optional[str]:
+        """Name of the interface being captured on, for the kernel filter to hook."""
+        if CAPTURE_IFACE:
+            return CAPTURE_IFACE
+        try:
+            iface = scapy.conf.iface
+            return getattr(iface, "name", None) or str(iface)
+        except Exception:
+            return None
+
+    def _refresh_never_block(self) -> None:
+        """
+        Work out which MACs must never be blacklisted: this host's own and its
+        gateway's. Called at start-up and again whenever protection is turned
+        on, in case the gateway could not be resolved the first time.
+        """
+        macs = {self.state.mac}
+        try:
+            macs.add(scapy.get_if_hwaddr(CAPTURE_IFACE or scapy.conf.iface))
+        except Exception:
+            pass
+        gateway_ip = None
+        try:
+            gateway_ip = scapy.conf.route.route("0.0.0.0")[2]
+            if gateway_ip and gateway_ip != "0.0.0.0":
+                macs.add(scapy.getmacbyip(gateway_ip))
+        except Exception as exc:
+            print(f"[SentiNet Daemon] Could not resolve the gateway's MAC: {exc}")
+        resolved = {m for m in (normalise_mac(mac) for mac in macs) if m}
+        with self.state._lock:
+            before = set(self.state.never_block)
+            self.state.never_block |= resolved
+            added = self.state.never_block - before
+        if added:
+            print(f"[SentiNet Daemon] Never blacklisting (this host / gateway {gateway_ip}): "
+                  f"{', '.join(sorted(added))}")
 
     def _snapshot_for_tray(self) -> Dict[str, Any]:
         """
@@ -660,6 +751,8 @@ class SentiNetDaemon:
     def _handle_tray_message(self, msg_type: str, data: Dict[str, Any]) -> None:
         """Handle messages received from the unprivileged tray process."""
         if msg_type == MSG_TOGGLE_REQUEST:
+            if not self.state.is_protected():
+                self._refresh_never_block()
             new_val = self.state.toggle()
             self.bayanihan_client.set_enabled(new_val)
             self.ipc.broadcast(MSG_TOGGLE_ACK, {"protected": new_val})
@@ -712,6 +805,9 @@ class SentiNetDaemon:
             self.telemetry.stop()
             self.ipc.stop()
             self.bayanihan_client.set_enabled(False)
+            # Leave no kernel rules behind once nothing is managing them.
+            if self.state.enforcer is not None:
+                self.state.enforcer.stop()
             print("[SentiNet Daemon] Stopped cleanly.", flush=True)
             # Exit for certain. SIGTERM is handled above, so if interpreter
             # shutdown then stalls on a background thread the process can no
