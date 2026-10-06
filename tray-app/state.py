@@ -55,6 +55,11 @@ class AgentState:
         # Bayanihan
         self.sig_contributions: int = 0
         self.bayanihan_pending: int = 0
+        # Mirrored from the daemon: whether it is really connected to the relay,
+        # where that relay is, and the name of the network this machine is on.
+        self.relay_status: str = "offline"
+        self.relay_url: str = ""
+        self.network: str = ""
 
         # Detection log
         # This node's own identity, pushed by the daemon.
@@ -113,6 +118,9 @@ class AgentState:
 
         with self._lock:
             self.protected = status.get("protected", self.protected)
+            self.relay_status = status.get("relay", self.relay_status)
+            self.relay_url = status.get("relayUrl", self.relay_url)
+            self.network = status.get("network", self.network)
             since_str = status.get("since")
             if since_str:
                 try:
@@ -180,7 +188,9 @@ class AgentState:
                 since = datetime.fromtimestamp(self.protected_since).isoformat()
             return {
                 "protected": self.protected,
-                "relay": "online" if self.protected else "offline",
+                "relay": self.relay_status if self.protected else "offline",
+                "relayUrl": self.relay_url,
+                "network": self.network,
                 "version": AGENT_VERSION,
                 "since": since,
             }
