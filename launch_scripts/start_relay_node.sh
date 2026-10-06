@@ -243,9 +243,16 @@ fi
 
 # ─── 3 & 4. Relay server + admin dashboard ──────────────────────────────────
 
+# shellcheck source=lib_services.sh
+source "$ROOT/launch_scripts/lib_services.sh"
+
 start_service() {
     local name=$1 dir=$2 cmd=$3
     local log_file="/tmp/sentinet_${name}.log"
+
+    # An instance left over from an earlier run would keep its port, pushing
+    # this one onto a different port than everything else expects.
+    stop_service "$name" "$dir" quiet
 
     echo "      Starting $name (log: $log_file)"
     (
