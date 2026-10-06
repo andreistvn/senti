@@ -192,7 +192,7 @@ class AgentState:
                 "dropped": self.dropped,
                 "passed": self.passed,
                 "blocked": self.blocked,
-                "cpu": round(self.cpu, 1),
+                "cpu": round(self.cpu, 5),
                 "memory": self.memory,
                 "memoryMb": round(self.memory_mb, 1),
                 "bayanihan": {

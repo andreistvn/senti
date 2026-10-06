@@ -322,7 +322,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                         <div className="flex flex-col gap-1 w-36">
                           <div className="flex justify-between text-[9px] font-bold uppercase">
                             <span>CPU</span>
-                            <span className={`font-['JetBrains_Mono',_monospace] ${agent.cpu > 70 ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>{agent.cpu}%</span>
+                            <span className={`font-['JetBrains_Mono',_monospace] ${agent.cpu > 70 ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>{(agent.cpu ?? 0).toFixed(5)}%</span>
                           </div>
                           <div className="h-1.5 border border-[#e2e8f0] bg-white">
                             <div className={`h-full transition-all duration-500 ${agent.cpu > 70 ? 'bg-[#DC2626]' : 'bg-[#1E3A8A]'}`} style={{ width: `${agent.cpu}%` }} />
@@ -384,7 +384,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           <div className="flex-1 min-h-0 p-5 flex flex-col justify-center">
             <div className="flex gap-6">
               <div className="flex-1 flex flex-col gap-2">
-                <div className="flex justify-between text-sm font-bold uppercase"><span>Relay Node CPU</span><span className="font-['JetBrains_Mono',_monospace]">{telemetry.cpu}%</span></div>
+                <div className="flex justify-between text-sm font-bold uppercase"><span>Relay Node CPU</span><span className="font-['JetBrains_Mono',_monospace]">{(telemetry.cpu ?? 0).toFixed(5)}%</span></div>
                 <div className="w-full h-8 border border-[#e2e8f0] p-1 bg-white">
                   <div className="h-full bg-[#1a73e8] transition-all duration-500" style={{ width: `${telemetry.cpu}%` }} />
                 </div>
