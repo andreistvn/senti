@@ -1,12 +1,15 @@
 import React from 'react';
-import { LineChart, Line, ResponsiveContainer } from 'recharts';
+import ScrollingLine from './ScrollingLine';
 import { useDashboardState } from '../dashboard/useDashboardState';
 
 export default function Dashboard() {
   const {
     cpuData,
+    cpuIntervalMs,
     lastUpdate,
     eProtected,
+    eRelayOnline,
+    eNetwork,
     eInspected,
     eDropped,
     ePassed,
@@ -81,14 +84,12 @@ export default function Dashboard() {
             <PanelHeader title="Relay Connection" />
             <div className="p-5">
               <div className="flex items-center gap-2 mb-3">
-                <div className="w-2.5 h-2.5 shrink-0" style={{ background: eProtected ? '#00aa55' : '#3a5070' }} />
+                <div className="w-2.5 h-2.5 shrink-0" style={{ background: eRelayOnline ? '#00aa55' : '#3a5070' }} />
                 <span className="text-[#111] text-sm tracking-widest font-bold">
-                  RELAY: {eProtected ? 'ONLINE' : 'OFFLINE'}
+                  RELAY: {eRelayOnline ? 'ONLINE' : 'OFFLINE'}
                 </span>
               </div>
-              <p className="text-[#888] text-[10px] tracking-wider">
-                {eProtected ? 'Connected to DICT Central Relay' : 'Relay link down — protection off'}
-              </p>
+              <p className="text-[#888] text-[10px] tracking-wider">Network: {eNetwork || '—'}</p>
             </div>
           </div>
 
@@ -110,11 +111,7 @@ export default function Dashboard() {
           <div className="bg-white border border-[#cccccc]">
             <PanelHeader title="CPU Load (Tier-1 Efficiency)" />
             <div className="p-5">
-              <ResponsiveContainer width="100%" height={80}>
-                <LineChart data={cpuData}>
-                  <Line type="monotone" dataKey="usage" stroke="#1a4fd6" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
+              <ScrollingLine values={cpuData.map(d => d.usage)} intervalMs={cpuIntervalMs} />
               <div className="flex items-baseline gap-2 mt-2">
                 <span className="text-[#111] text-xl font-bold tracking-widest">{cpuData[cpuData.length - 1].usage.toFixed(1)}%</span>
                 <span className="text-[#00aa55] text-[10px] tracking-widest">LOW IMPACT</span>
