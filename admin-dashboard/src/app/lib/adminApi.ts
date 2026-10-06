@@ -269,6 +269,26 @@ export interface SopEvaluation {
   falsePositiveRate: number;
 }
 
+// The agent's per-packet verdicts scored against the attacker declared for the
+// run (start_relay_node.sh --attacker). Rates are null until there is data.
+export interface SopLiveMatrix {
+  truePositives: number;
+  falsePositives: number;
+  trueNegatives: number;
+  falseNegatives: number;
+  n: number;
+  accuracy: number | null;
+  detectionRate: number | null;
+  falsePositiveRate: number | null;
+}
+
+// How long Tier 2 took over the reporting agent's most recent detection.
+export interface SopDetectionLatency {
+  mac: string;
+  packets: number;
+  ms: number;
+}
+
 export interface SopTtbTrial {
   attackerMac: string;
   detectedBy: string;
@@ -289,6 +309,10 @@ export interface SopSummary {
   };
   detection: {
     evaluation: SopEvaluation | null;
+    // Attacker MAC(s) declared for this run; empty means no live matrix.
+    attackerMacs?: string[];
+    live?: SopLiveMatrix | null;
+    latency?: SopDetectionLatency | null;
     // Attack packets, counted by the reporting agent. Null until it sends them.
     blockedAttacks: number | null;
     totalDetectedAttacks: number | null;
