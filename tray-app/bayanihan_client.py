@@ -18,14 +18,15 @@ from config import (
 
 class _PendingReportStore:
     """
-    Durable, append-only store for attack reports not yet acknowledged by the
-    relay.
+    On-disk copy of the attack reports not yet acknowledged by the relay.
 
-    Without this, a daemon restart during a relay outage would silently lose
-    exactly the reports this class exists to protect — the in-memory queue
-    alone only survives a dropped/slow connection, not a crash or an update.
-    A plain SQLite file is enough: one small table, keyed by the client-
-    generated event id so re-adding an already-stored row is a no-op.
+    It lasts exactly as long as the agent process does: reports wait here
+    through a relay outage or with protection off, and are discarded when the
+    agent stops (see BayanihanClient.clear_pending). An agent that starts up
+    therefore always starts with nothing pending — reports from an earlier run
+    describe a session whose blacklist no longer exists. A plain SQLite file is
+    enough: one small table, keyed by the client-generated event id so
+    re-adding an already-stored row is a no-op.
     """
 
     def __init__(self, path: str):
@@ -64,6 +65,14 @@ class _PendingReportStore:
                 "DELETE FROM pending_reports WHERE client_event_id = ?", (client_event_id,)
             )
             self._conn.commit()
+
+    def clear(self) -> int:
+        """Discard every stored report. Returns how many there were."""
+        with self._lock:
+            count = self._conn.execute("SELECT COUNT(*) FROM pending_reports").fetchone()[0]
+            self._conn.execute("DELETE FROM pending_reports")
+            self._conn.commit()
+        return count
 
     def load_all(self) -> list:
         """Everything still unacknowledged, oldest first — called once at startup."""
@@ -123,18 +132,17 @@ class BayanihanClient:
         self._store = _PendingReportStore(pending_store_path)
         self._pending_lock = threading.Lock()
         self._pending: "OrderedDict[str, dict]" = OrderedDict()
-        for item in self._store.load_all():
-            client_event_id = item["event"].get("clientEventId")
-            if client_event_id:
-                self._pending[client_event_id] = item
+        # Anything still on disk was left by an agent that did not get to shut
+        # down cleanly (force-killed, crashed, power lost). Pending reports are
+        # not carried from one run of the agent to the next.
+        leftover = self._store.clear()
+        if leftover:
+            print(f"[BayanihanClient] Discarded {leftover} undelivered report(s) left by a previous run.")
         # Set when a report is queued, so _report_loop delivers it at once
         # instead of on its next retry tick. That tick is REPORT_RETRY_INTERVAL
         # (2s) — fine for retries, but as the delay on a first delivery it would
         # dominate the Time-to-Block every other agent sees.
         self._report_wake = threading.Event()
-        if self._pending:
-            print(f"[BayanihanClient] Recovered {len(self._pending)} unsent report(s) from a previous run.")
-
         self._setup_events()
 
         print(f"[BayanihanClient] Relay target: {self.relay_url}")
@@ -326,6 +334,15 @@ class BayanihanClient:
             f"({client_event_id[:8]}…); {self.pending_count()} pending delivery."
         )
 
+    def clear_pending(self) -> int:
+        """
+        Drop every undelivered report, in memory and on disk. Called when the
+        agent shuts down: the queue lives only as long as the agent does.
+        """
+        with self._pending_lock:
+            self._pending.clear()
+        return self._store.clear()
+
     def pending_count(self) -> int:
         """Reports accepted but not yet acknowledged by the relay. For dashboards/telemetry."""
         with self._pending_lock:
@@ -389,7 +406,9 @@ class BayanihanClient:
 
     def send_telemetry(self, cpu: float, ram: float, state: str = None,
                        ram_mb: float = None, protected: bool = None,
-                       scenario: str = None, ram_process_percent: float = None):
+                       scenario: str = None, ram_process_percent: float = None,
+                       attack_detected: int = None, attack_blocked: int = None,
+                       enforcement: str = None):
         """
         Report resource consumption to the relay.
 
@@ -398,7 +417,10 @@ class BayanihanClient:
         relay records for analysis. scenario is the traffic scenario this agent is
         currently experiencing, which the relay stores alongside the reading.
         ram_process_percent is that same RSS as a share of this machine's RAM,
-        for the bar next to the agent in the admin dashboard.
+        for the bar next to the agent in the admin dashboard. attack_detected and
+        attack_blocked are this agent's running packet counts for SOP 2's
+        prevention rate, and enforcement says whether "blocked" can be non-zero
+        here at all ("kernel") or the platform only counts ("simulated").
         """
         if self.connected and self.agent_info:
             try:
@@ -417,6 +439,11 @@ class BayanihanClient:
                     payload["scenario"] = scenario
                 if ram_process_percent is not None:
                     payload["ramProcessPercent"] = ram_process_percent
+                if attack_detected is not None:
+                    payload["attackDetected"] = attack_detected
+                    payload["attackBlocked"] = attack_blocked or 0
+                if enforcement:
+                    payload["enforcement"] = enforcement
                 self.sio.emit("telemetry_report", payload)
             except Exception as e:
                 pass

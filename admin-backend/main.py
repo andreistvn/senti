@@ -530,8 +530,6 @@ async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str
     # no detection time and are left out — they are not first detections.
     detected_at_ms = data.get("detectedAtMs")
     ttb_event_id = None
-    if tier == "Tier 2":
-        state.count_sop_detection(reporter_mac, action)
     if tier == "Tier 2" and client_event_id and isinstance(detected_at_ms, (int, float)):
         state.record_ttb_detection(
             event_id=client_event_id,
@@ -616,6 +614,9 @@ async def telemetry_report(sid, data):
         state.update_agent_telemetry(
             mac, cpu, ram, agent_state, ram_mb=ram_mb, protected=protected,
             scenario=scenario, ram_process_percent=ram_process_percent,
+            attack_detected=data.get("attackDetected"),
+            attack_blocked=data.get("attackBlocked"),
+            enforcement=data.get("enforcement"),
         )
 
 @sio.event

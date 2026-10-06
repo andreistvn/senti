@@ -65,8 +65,12 @@ function buildCards(summary: SopSummary | null): SopCard[] {
   if (evaluation) {
     detectionParts.push(`Held-out test set · n = ${evaluation.n} windows · threshold ${evaluation.threshold.toFixed(2)}`);
   }
-  if (detection && detection.totalDetectedAttacks > 0) {
-    detectionParts.push("prevention from this agent's live detections");
+  if (detection?.totalDetectedAttacks != null) {
+    detectionParts.push(
+      detection.enforcement === 'simulated'
+        ? "attack packets counted live · this agent's OS cannot drop packets, so none are blocked"
+        : 'attack packets counted live · blocked = dropped by the kernel',
+    );
   }
 
   let ttbFooter = AWAITING;
@@ -120,8 +124,8 @@ function buildCards(summary: SopSummary | null): SopCard[] {
           ],
           [{ label: 'Accuracy', unit: '%', value: fixed(evaluation?.accuracy, 2) }],
           [
-            { label: 'Blocked Attacks', value: summary?.efficiency.agent ? count(detection?.blockedAttacks) : null },
-            { label: 'Total Detected Attacks', value: summary?.efficiency.agent ? count(detection?.totalDetectedAttacks) : null },
+            { label: 'Blocked Attacks', value: count(detection?.blockedAttacks) },
+            { label: 'Total Detected Attacks', value: count(detection?.totalDetectedAttacks) },
             { label: 'Prevention Rate', unit: '%', value: fixed(detection?.preventionRate, 2) },
           ],
         ],

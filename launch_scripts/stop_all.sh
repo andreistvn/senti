@@ -50,6 +50,17 @@ else
     echo "  Agent daemon is not running."
 fi
 
+# Undelivered attack reports last only as long as the agent does. The daemon
+# empties this itself on a clean exit; removing the file covers one that had to
+# be force-killed. It is root's file in our own directory, so plain rm can
+# usually remove it; fall back to sudo if not.
+PENDING_DB="$ROOT/tray-app/pending_reports.db"
+if [ -e "$PENDING_DB" ] || [ -e "$PENDING_DB-journal" ]; then
+    rm -f "$PENDING_DB" "$PENDING_DB-journal" 2>/dev/null \
+        || sudo rm -f "$PENDING_DB" "$PENDING_DB-journal"
+    echo "  Cleared undelivered attack reports."
+fi
+
 # A daemon that had to be force-killed cannot clean up after itself, which on
 # Linux would leave its kernel rules dropping blacklisted MACs indefinitely.
 NFT_BIN="$(command -v nft 2>/dev/null || true)"

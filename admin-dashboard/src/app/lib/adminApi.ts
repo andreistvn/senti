@@ -289,9 +289,13 @@ export interface SopSummary {
   };
   detection: {
     evaluation: SopEvaluation | null;
-    blockedAttacks: number;
-    totalDetectedAttacks: number;
+    // Attack packets, counted by the reporting agent. Null until it sends them.
+    blockedAttacks: number | null;
+    totalDetectedAttacks: number | null;
     preventionRate: number | null;
+    // 'kernel' when blocked packets are really dropped; 'simulated' when the
+    // agent's platform can only count them.
+    enforcement: 'kernel' | 'simulated' | null;
   };
   timeToBlock: {
     latest: SopTtbTrial | null;
