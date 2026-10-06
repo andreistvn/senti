@@ -50,6 +50,11 @@ REPORT_QUEUE_MAX = int(os.environ.get("SENTINET_REPORT_QUEUE_MAX", "2000"))
 REPORT_ACK_TIMEOUT = float(os.environ.get("SENTINET_REPORT_ACK_TIMEOUT", "8.0"))
 REPORT_RETRY_INTERVAL = float(os.environ.get("SENTINET_REPORT_RETRY_INTERVAL", "2.0"))
 
+# Network interface to capture on and enforce blocks on. Empty means Scapy's
+# default (the interface holding the default route), which is right for a host
+# with one network connection.
+CAPTURE_IFACE = os.environ.get("SENTINET_IFACE", "")
+
 # Traffic-scenario labelling for the resource-consumption readings (SOP 1).
 # Chapter 3 evaluates CPU/RAM under three scenarios: normal traffic, targeted
 # ARP poisoning (nominally 100 PPS) and sustained ARP flooding (nominally 1,000

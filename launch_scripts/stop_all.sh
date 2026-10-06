@@ -65,6 +65,16 @@ else
     echo "  Agent daemon is not running."
 fi
 
+# A daemon that had to be force-killed cannot clean up after itself, which on
+# Linux would leave its kernel rules dropping blacklisted MACs indefinitely.
+NFT_BIN="$(command -v nft 2>/dev/null || true)"
+# Not on an ordinary user's PATH on Debian-family systems.
+[ -z "$NFT_BIN" ] && [ -x /usr/sbin/nft ] && NFT_BIN=/usr/sbin/nft
+if [ -n "$NFT_BIN" ] && sudo "$NFT_BIN" list table netdev sentinet >/dev/null 2>&1; then
+    echo "  Removing leftover SentiNet kernel block rules..."
+    sudo "$NFT_BIN" delete table netdev sentinet
+fi
+
 # ─── 3. MultiChain node ─────────────────────────────────────────────────────
 if [ "${KEEP_CHAIN:-0}" = "1" ]; then
     echo "  Leaving MultiChain node running (KEEP_CHAIN=1)."
