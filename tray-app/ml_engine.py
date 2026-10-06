@@ -92,6 +92,12 @@ class MLEngine:
         with self.lock:
             return len(self.history.get(src_mac, ()))
 
+    def window_span(self, src_mac: str) -> float:
+        """Seconds from the oldest to the newest packet in this MAC's window."""
+        with self.lock:
+            window = self.history.get(src_mac)
+            return (window[-1]['timestamp'] - window[0]['timestamp']) if window else 0.0
+
     def process_packet(self, src_mac: str, op: int, src_ip: str, dst_ip: str) -> float:
         """
         Ingests a packet, updates the sliding window, extracts features, 
