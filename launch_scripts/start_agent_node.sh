@@ -82,7 +82,7 @@ MISSING=""
 if [ ! -f "$ROOT/tray-app/venv/bin/activate" ]; then
     MISSING="$MISSING
   tray-app/venv is missing. Create it:
-      cd tray-app && python3 -m venv venv && source venv/bin/activate \\
+      cd tray-app && python3 -m venv --system-site-packages venv && source venv/bin/activate \\
         && pip install -r requirements.txt"
 fi
 

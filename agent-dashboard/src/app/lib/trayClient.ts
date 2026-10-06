@@ -11,6 +11,8 @@ export const BASE_URL = 'http://127.0.0.1:8770';
 export interface TrayStatus {
   protected: boolean;
   relay: 'online' | 'offline';
+  relayUrl?: string;  // where this agent's relay is
+  network?: string;   // Wi-Fi / connection name this machine is on
   version: string;
   since: string | null;
 }

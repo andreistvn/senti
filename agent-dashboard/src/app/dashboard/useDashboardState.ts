@@ -12,7 +12,9 @@ interface DetectionLog {
 
 export function useDashboardState(intervalMs = 1000) {
   const [cpuData, setCpuData] = useState(
-    Array.from({ length: 60 }, (_, i) => ({ time: i, usage: 0 }))
+    // A minute of readings, plus the one sliding in from the right edge and
+    // the one sliding out at the left (see ScrollingLine).
+    Array.from({ length: 62 }, (_, i) => ({ time: i, usage: 0 }))
   );
 
   const tray = useTrayConnection(intervalMs);
@@ -40,6 +42,8 @@ export function useDashboardState(intervalMs = 1000) {
 
   // Expose ONLY real data. No mock fallback.
   const eProtected = tray.status?.protected ?? false;
+  const eRelayOnline = tray.status?.relay === 'online';
+  const eNetwork = tray.status?.network ?? '';
   const eInspected = tray.stats?.inspected ?? 0;
   const eDropped = tray.stats?.dropped ?? 0;
   const ePassed = tray.stats?.passed ?? 0;
@@ -77,8 +81,11 @@ export function useDashboardState(intervalMs = 1000) {
 
   return {
     cpuData,
+    cpuIntervalMs: intervalMs,
     lastUpdate: 0, // Not used as much anymore, or can be static
     eProtected,
+    eRelayOnline,
+    eNetwork,
     eInspected,
     eDropped,
     ePassed,

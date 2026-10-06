@@ -32,6 +32,7 @@ import scapy.all as scapy
 from ml_engine import MLEngine
 from bayanihan_client import BayanihanClient
 from enforcer import Enforcer, normalise_mac
+from netinfo import network_name
 
 from config import (
     AGENT_VERSION,
@@ -675,6 +676,7 @@ class SentiNetDaemon:
         self.state.ip = ip_addr
         self.state.mac = mac_addr
         self.state.enforcer = Enforcer(iface=self._capture_iface())
+        self.network = network_name(self._capture_iface())
         print(f"[Enforcer] Mode: {self.state.enforcer.mode} ({self.state.enforcer.reason})")
         self._refresh_never_block()
         self.ml_engine = MLEngine()
@@ -746,6 +748,12 @@ class SentiNetDaemon:
         """
         snapshot = self.state.snapshot()
         snapshot["stats"]["bayanihan"]["pending"] = self.bayanihan_client.pending_count()
+        # The relay link as it really is. DaemonState reports "online" whenever
+        # protection is on, which is wrong for an agent in local detection mode
+        # (relay down, unreachable, or deliberately run standalone).
+        snapshot["status"]["relay"] = "online" if self.bayanihan_client.connected else "offline"
+        snapshot["status"]["relayUrl"] = self.bayanihan_client.relay_url
+        snapshot["status"]["network"] = self.network
         return snapshot
 
     def _handle_tray_message(self, msg_type: str, data: Dict[str, Any]) -> None:
@@ -753,6 +761,7 @@ class SentiNetDaemon:
         if msg_type == MSG_TOGGLE_REQUEST:
             if not self.state.is_protected():
                 self._refresh_never_block()
+                self.network = network_name(self._capture_iface())
             new_val = self.state.toggle()
             self.bayanihan_client.set_enabled(new_val)
             self.ipc.broadcast(MSG_TOGGLE_ACK, {"protected": new_val})
