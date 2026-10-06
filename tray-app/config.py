@@ -38,8 +38,8 @@ IPC_TCP_FALLBACK_PORT = int(os.environ.get("SENTINET_IPC_PORT", "8769"))
 
 # Bayanihan attack-report delivery. Reports are queued durably (SQLite) and
 # retried with an ack until the relay confirms it stored them — see
-# bayanihan_client.py. PENDING_REPORTS_DB_PATH is where that queue survives a
-# daemon restart; REPORT_QUEUE_MAX caps it so a relay outage can't grow it
+# bayanihan_client.py. PENDING_REPORTS_DB_PATH is where that queue is kept while
+# the agent runs (it is emptied when the agent stops); REPORT_QUEUE_MAX caps it so a relay outage can't grow it
 # without bound (oldest unsent report is dropped first); REPORT_ACK_TIMEOUT is
 # how long one delivery attempt waits for the relay's ack before retrying.
 PENDING_REPORTS_DB_PATH = os.environ.get(
@@ -74,4 +74,7 @@ CAPTURE_IFACE = os.environ.get("SENTINET_IFACE", "")
 # per second, after its attack has ended) from being read as an attack.
 POISON_PPS_THRESHOLD = float(os.environ.get("SENTINET_POISON_PPS_THRESHOLD", "5"))
 FLOOD_PPS_THRESHOLD = float(os.environ.get("SENTINET_FLOOD_PPS_THRESHOLD", "100"))
+# How often, at most, the kernel's drop counter is read while an attack is being
+# blocked (SOP 2's "blocked attacks"). Each read runs a system command.
+KERNEL_COUNTER_REFRESH_SECONDS = float(os.environ.get("SENTINET_KERNEL_COUNTER_REFRESH", "5.0"))
 SCENARIO_WINDOW_SECONDS = float(os.environ.get("SENTINET_SCENARIO_WINDOW", "5.0"))

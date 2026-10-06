@@ -87,6 +87,11 @@ class MLEngine:
             "falsePositiveRate": fp / (fp + tn) * 100 if (fp + tn) else None,
         }
 
+    def window_count(self, src_mac: str) -> int:
+        """Packets from this MAC currently in its sliding window."""
+        with self.lock:
+            return len(self.history.get(src_mac, ()))
+
     def process_packet(self, src_mac: str, op: int, src_ip: str, dst_ip: str) -> float:
         """
         Ingests a packet, updates the sliding window, extracts features, 

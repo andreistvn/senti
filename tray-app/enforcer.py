@@ -97,6 +97,9 @@ class Enforcer:
         self._lock = threading.Lock()
         self._wanted: Set[str] = set()
         self._active = False
+        # Frames dropped during earlier protection sessions: the kernel's own
+        # counter starts again from zero each time the table is reloaded.
+        self._dropped_before = 0
         self.iface = iface
         self._nft = nft_path or _find_nft()
 
@@ -187,6 +190,7 @@ class Enforcer:
             if not self._active:
                 return None
             dropped = self._dropped_packets_locked()
+            self._dropped_before += dropped or 0
             self._delete_table_locked()
             self._active = False
             print(f"[Enforcer] Kernel blocking removed"
@@ -258,6 +262,45 @@ class Enforcer:
             if not self._active:
                 return None
             return self._dropped_packets_locked()
+
+    def total_dropped(self) -> int:
+        """
+        ARP frames the kernel has dropped for this agent since it started,
+        across every protection session. This is the figure for "blocked": it
+        is counted by the kernel at the moment of the drop, so it cannot include
+        a frame that slipped through while a rule was still being installed.
+        """
+        with self._lock:
+            current = self._dropped_packets_locked() if self._active else None
+            return self._dropped_before + (current or 0)
+
+    def restore_neighbour(self, ip: Optional[str], mac: Optional[str]) -> bool:
+        """
+        Put a known-good IP-to-MAC mapping back into the kernel's ARP cache.
+
+        Blocking an attacker stops any further forged replies, but the handful
+        that arrived before Tier 2 flagged it may already have overwritten the
+        gateway's entry — and nothing would correct that until the gateway next
+        happened to answer. Only done while enforcing, i.e. on Linux.
+        """
+        mac = normalise_mac(mac)
+        ip_tool = shutil.which("ip") or next(
+            (p for p in ("/usr/sbin/ip", "/sbin/ip", "/usr/bin/ip") if os.path.exists(p)), None)
+        with self._lock:
+            if not self._active or not ip or not mac or not ip_tool:
+                return False
+            try:
+                result = subprocess.run(
+                    [ip_tool, "neigh", "replace", ip, "lladdr", mac, "dev", self.iface, "nud", "reachable"],
+                    capture_output=True, text=True, timeout=NFT_TIMEOUT_SECONDS,
+                )
+            except Exception as exc:
+                print(f"[Enforcer] Could not restore the ARP entry for {ip}: {exc}", flush=True)
+                return False
+            if result.returncode != 0:
+                print(f"[Enforcer] Could not restore the ARP entry for {ip}: {result.stderr.strip()}", flush=True)
+                return False
+            return True
 
     def is_enforcing(self) -> bool:
         with self._lock:

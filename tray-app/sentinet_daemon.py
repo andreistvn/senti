@@ -43,6 +43,7 @@ from config import (
     FLOOD_PPS_THRESHOLD,
     POISON_PPS_THRESHOLD,
     SCENARIO_WINDOW_SECONDS,
+    KERNEL_COUNTER_REFRESH_SECONDS,
 )
 from ipc_protocol import (
     IpcServer,
@@ -134,6 +135,13 @@ class DaemonState:
         # would cut this machine off the network — including from the relay.
         self.never_block: Set[str] = set()
         self._never_block_logged: Set[str] = set()
+        # (ip, mac) of the gateway as resolved before any attack, so its ARP
+        # entry can be put back after one.
+        self.gateway: Optional[tuple] = None
+        # Attack packets that got through before their sender was flagged: the
+        # contents of the sliding window Tier 2 based each detection on. With
+        # the Tier-1 hits these make up SOP 2's "total detected attacks".
+        self.attack_pre_block: int = 0
 
         # This node's own identity, filled in by SentiNetDaemon once detected.
         # The agent dashboard header used to print a hardcoded address.
@@ -519,12 +527,21 @@ class CaptureEngine(threading.Thread):
                     "detectedAtMs": detected_at_ms,
                 }
 
+                # Counted before the blacklist entry exists: these packets are
+                # known to be malicious only now, and were not blocked.
+                seen_before_block = self.ml_engine.window_count(src_mac)
+                with self.state._lock:
+                    self.state.attack_pre_block += seen_before_block
+
                 self.state.add_to_blacklist(
                     src_mac,
                     origin="local",
                     attack_type=threat_event["attackType"],
                     confidence=threat_event["confidence"],
                 )
+                # Undo any poisoning those first packets managed.
+                if self.state.enforcer is not None and self.state.gateway:
+                    self.state.enforcer.restore_neighbour(*self.state.gateway)
                 
                 with self.state._lock:
                     self.state.events.appendleft(threat_event)
@@ -567,6 +584,11 @@ class TelemetryEngine(threading.Thread):
         self._cpu_sample = self._cpu_now()
         # (time, blocked counter) samples spanning SCENARIO_WINDOW_SECONDS.
         self._blocked_samples: deque = deque()
+        # Last reading of the kernel's drop counter, and the Tier-1 hit count
+        # at the time, so it is only re-read while an attack is in progress.
+        self._kernel_dropped = 0
+        self._kernel_read_at = 0.0
+        self._kernel_read_hits = -1
 
     def stop(self) -> None:
         self._stop.set()
@@ -595,6 +617,35 @@ class TelemetryEngine(threading.Thread):
             return "normal"
         return "flooding" if pps >= FLOOD_PPS_THRESHOLD else "poisoning"
 
+    def _attack_counts(self) -> tuple:
+        """
+        (detected, blocked) attack packets since this agent started — the two
+        terms of Chapter 3's Equation 4, Prevention Rate = Blocked / Detected.
+
+        Detected is every packet the agent attributed to an attacker: those in
+        the window that triggered each detection, plus every Tier-1 hit after.
+        Blocked is what the kernel actually discarded, read from its own
+        counter; on a platform with no kernel enforcement nothing is discarded,
+        so it is zero however many hits Tier 1 counted.
+        """
+        with self.state._lock:
+            tier1_hits = self.state.blocked
+            pre_block = self.state.attack_pre_block
+        enforcer = self.state.enforcer
+        if enforcer is None or enforcer.mode != "kernel":
+            return pre_block + tier1_hits, 0
+
+        # Reading the counter runs a system command, so only do it while the
+        # Tier-1 count is still moving, and not on every tick.
+        now = time.monotonic()
+        if tier1_hits != self._kernel_read_hits and (now - self._kernel_read_at) >= KERNEL_COUNTER_REFRESH_SECONDS:
+            self._kernel_dropped = enforcer.total_dropped()
+            self._kernel_read_at = now
+            self._kernel_read_hits = tier1_hits
+        blocked = self._kernel_dropped
+        # The sniffer can miss frames under a heavy flood; the kernel does not.
+        return pre_block + max(tier1_hits, blocked), blocked
+
     def _cpu_now(self) -> tuple:
         """(monotonic seconds, CPU seconds this process has consumed so far)."""
         times = self._proc.cpu_times()
@@ -620,6 +671,7 @@ class TelemetryEngine(threading.Thread):
             is_protected = self.state.is_protected()
             cpu, ram_mb, ram_percent, ram_process_percent = self._measure()
             scenario = self._classify_scenario()
+            attack_detected, attack_blocked = self._attack_counts()
 
             # Protection OFF used to report a fabricated 0 for both. The relay now
             # records these readings as research data, so send the real numbers and
@@ -639,6 +691,9 @@ class TelemetryEngine(threading.Thread):
                 protected=is_protected,
                 scenario=scenario,
                 ram_process_percent=ram_process_percent,
+                attack_detected=attack_detected,
+                attack_blocked=attack_blocked,
+                enforcement=self.state.enforcer.mode if self.state.enforcer else "simulated",
             )
 
 
@@ -723,7 +778,12 @@ class SentiNetDaemon:
         try:
             gateway_ip = scapy.conf.route.route("0.0.0.0")[2]
             if gateway_ip and gateway_ip != "0.0.0.0":
-                macs.add(scapy.getmacbyip(gateway_ip))
+                gateway_mac = scapy.getmacbyip(gateway_ip)
+                macs.add(gateway_mac)
+                # Kept from the first resolution only: a later lookup could be
+                # answered by an attacker already impersonating the gateway.
+                if normalise_mac(gateway_mac) and self.state.gateway is None:
+                    self.state.gateway = (gateway_ip, normalise_mac(gateway_mac))
         except Exception as exc:
             print(f"[SentiNet Daemon] Could not resolve the gateway's MAC: {exc}")
         resolved = {m for m in (normalise_mac(mac) for mac in macs) if m}
@@ -814,6 +874,9 @@ class SentiNetDaemon:
             self.telemetry.stop()
             self.ipc.stop()
             self.bayanihan_client.set_enabled(False)
+            discarded = self.bayanihan_client.clear_pending()
+            if discarded:
+                print(f"[SentiNet Daemon] Discarded {discarded} undelivered report(s).")
             # Leave no kernel rules behind once nothing is managing them.
             if self.state.enforcer is not None:
                 self.state.enforcer.stop()
