@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import os
 import random
+import ipaddress
 import signal
+import socket
 import sys
 import threading
 import time
@@ -25,6 +27,7 @@ import uuid
 from collections import deque
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urlparse
 
 import psutil
 import scapy.all as scapy
@@ -138,10 +141,22 @@ class DaemonState:
         # (ip, mac) of the gateway as resolved before any attack, so its ARP
         # entry can be put back after one.
         self.gateway: Optional[tuple] = None
+        self.relay_mac: Optional[str] = None
         # Attack packets that got through before their sender was flagged: the
         # contents of the sliding window Tier 2 based each detection on. With
         # the Tier-1 hits these make up SOP 2's "total detected attacks".
         self.attack_pre_block: int = 0
+
+        # SOP 2's live confusion matrix. `ground_truth` is the set of MACs the
+        # relay was told are the attacker(s) for this run — the only way to know
+        # what a packet really was, independently of what this agent decided
+        # about it. It is used for these four tallies and nothing else: Tier 1
+        # and Tier 2 never look at it. Empty means no run is being scored.
+        self.ground_truth: Set[str] = set()
+        self.confusion: Dict[str, int] = {"tp": 0, "fp": 0, "tn": 0, "fn": 0}
+        # How long Tier 2 took over its most recent detection: packets seen
+        # from that MAC, and the time they spanned, before it was flagged.
+        self.detection_latency: Optional[Dict[str, Any]] = None
 
         # This node's own identity, filled in by SentiNetDaemon once detected.
         # The agent dashboard header used to print a hardcoded address.
@@ -194,6 +209,33 @@ class DaemonState:
             self.enforcer.block(mac)
         return is_new
 
+    def set_ground_truth(self, macs) -> None:
+        """Declare which MACs are the attacker(s); a change starts the tally afresh."""
+        declared = {m for m in (normalise_mac(mac) for mac in (macs or [])) if m}
+        with self._lock:
+            if declared == self.ground_truth:
+                return
+            self.ground_truth = declared
+            self.confusion = {"tp": 0, "fp": 0, "tn": 0, "fn": 0}
+        if declared:
+            print(f"[DaemonState] Scoring this run against declared attacker(s): {', '.join(sorted(declared))}")
+        else:
+            print("[DaemonState] No attacker declared — live confusion matrix off.")
+
+    def score_verdict(self, mac: str, treated_as_attack: bool) -> None:
+        """
+        Tally one packet into the live confusion matrix: what this agent decided
+        about it, against what the declared ground truth says it really was.
+        """
+        with self._lock:
+            if not self.ground_truth:
+                return
+            is_attacker = (mac or "").lower() in self.ground_truth
+            if is_attacker:
+                self.confusion["tp" if treated_as_attack else "fn"] += 1
+            else:
+                self.confusion["fp" if treated_as_attack else "tn"] += 1
+
     def is_never_block(self, mac: str, source: str = "local") -> bool:
         """True for a MAC that is exempt from blacklisting; logs the first refusal."""
         key = normalise_mac(mac)
@@ -203,8 +245,8 @@ class DaemonState:
             first = key not in self._never_block_logged
             self._never_block_logged.add(key)
         if first:
-            print(f"[DaemonState] Refusing to blacklist {mac} ({source}): it is this host "
-                  f"or its gateway. Check for a false positive.", flush=True)
+            print(f"[DaemonState] Refusing to blacklist {mac} ({source}): it is this host, "
+                  f"its gateway or its relay. Check for a false positive.", flush=True)
         return True
 
     def classify_tier1_hit(self, mac: str) -> Optional[str]:
@@ -451,6 +493,7 @@ class CaptureEngine(threading.Thread):
                     # On Linux the kernel has already discarded this frame
                     # (enforcer.py) and this is the sniffer's copy of it; on
                     # other platforms ceasing processing only simulates a block.
+                self.state.score_verdict(src_mac, treated_as_attack=True)
 
                 # Surface this — the visible proof that either this agent's own
                 # earlier detection (Tier 1) or another agent's report relayed
@@ -504,7 +547,9 @@ class CaptureEngine(threading.Thread):
             score = self.ml_engine.process_packet(src_mac, op, src_ip, dst_ip)
             
             if score >= 0.50 and self.state.is_never_block(src_mac, source=f"Tier 2 score {score:.2f}"):
-                return
+                score = 0.0     # exempt, so it is let through like any benign packet
+
+            self.state.score_verdict(src_mac, treated_as_attack=score >= 0.50)
 
             if score >= 0.50:
                 # t_detected in Chapter 3's Time-to-Block formula: the moment
@@ -532,6 +577,11 @@ class CaptureEngine(threading.Thread):
                 seen_before_block = self.ml_engine.window_count(src_mac)
                 with self.state._lock:
                     self.state.attack_pre_block += seen_before_block
+                    self.state.detection_latency = {
+                        "mac": src_mac,
+                        "packets": seen_before_block,
+                        "ms": round(self.ml_engine.window_span(src_mac) * 1000),
+                    }
 
                 self.state.add_to_blacklist(
                     src_mac,
@@ -584,11 +634,13 @@ class TelemetryEngine(threading.Thread):
         self._cpu_sample = self._cpu_now()
         # (time, blocked counter) samples spanning SCENARIO_WINDOW_SECONDS.
         self._blocked_samples: deque = deque()
-        # Last reading of the kernel's drop counter, and the Tier-1 hit count
-        # at the time, so it is only re-read while an attack is in progress.
-        self._kernel_dropped = 0
+        # SOP 2's packet counts as last computed from the kernel's drop counter
+        # (see _attack_counts), and what the agent's own counts stood at then,
+        # so the counter is only re-read while an attack is in progress.
+        self._attack_reported = (0, 0)
+        self._not_blocked = 0
         self._kernel_read_at = 0.0
-        self._kernel_read_hits = -1
+        self._kernel_read_seen = None
 
     def stop(self) -> None:
         self._stop.set()
@@ -622,11 +674,17 @@ class TelemetryEngine(threading.Thread):
         (detected, blocked) attack packets since this agent started — the two
         terms of Chapter 3's Equation 4, Prevention Rate = Blocked / Detected.
 
-        Detected is every packet the agent attributed to an attacker: those in
-        the window that triggered each detection, plus every Tier-1 hit after.
         Blocked is what the kernel actually discarded, read from its own
-        counter; on a platform with no kernel enforcement nothing is discarded,
-        so it is zero however many hits Tier 1 counted.
+        counter. Detected is that plus every attack packet that was NOT
+        discarded: the ones in the window that triggered each detection, and any
+        that arrived in the instant before a block took hold. On a platform with
+        no kernel enforcement nothing is discarded, so blocked is zero and
+        detected is everything Tier 1 and Tier 2 attributed to an attacker.
+
+        The two figures are always produced together, from one reading of the
+        kernel counter, and are held unchanged until the next reading — so they
+        never describe two different moments, and blocked can never be ahead of
+        detected.
         """
         with self.state._lock:
             tier1_hits = self.state.blocked
@@ -636,15 +694,23 @@ class TelemetryEngine(threading.Thread):
             return pre_block + tier1_hits, 0
 
         # Reading the counter runs a system command, so only do it while the
-        # Tier-1 count is still moving, and not on every tick.
+        # counts are still moving, and not on every tick.
         now = time.monotonic()
-        if tier1_hits != self._kernel_read_hits and (now - self._kernel_read_at) >= KERNEL_COUNTER_REFRESH_SECONDS:
-            self._kernel_dropped = enforcer.total_dropped()
+        seen = (tier1_hits, pre_block)
+        if seen != self._kernel_read_seen and (now - self._kernel_read_at) >= KERNEL_COUNTER_REFRESH_SECONDS:
+            # tier1_hits was taken BEFORE this read, so the kernel's figure can
+            # only be level with it or ahead — never behind by a packet that is
+            # merely still on its way through the sniffer.
+            dropped = enforcer.total_dropped()
+            # Packets known to be malicious that the kernel did not drop. The
+            # true figure only ever grows, but the sniffer runs slightly behind
+            # the kernel (and can miss frames in a heavy flood), which makes any
+            # one estimate too low; keeping the highest seen removes that noise.
+            self._not_blocked = max(self._not_blocked, pre_block + max(tier1_hits - dropped, 0))
+            self._attack_reported = (dropped + self._not_blocked, dropped)
             self._kernel_read_at = now
-            self._kernel_read_hits = tier1_hits
-        blocked = self._kernel_dropped
-        # The sniffer can miss frames under a heavy flood; the kernel does not.
-        return pre_block + max(tier1_hits, blocked), blocked
+            self._kernel_read_seen = seen
+        return self._attack_reported
 
     def _cpu_now(self) -> tuple:
         """(monotonic seconds, CPU seconds this process has consumed so far)."""
@@ -672,6 +738,9 @@ class TelemetryEngine(threading.Thread):
             cpu, ram_mb, ram_percent, ram_process_percent = self._measure()
             scenario = self._classify_scenario()
             attack_detected, attack_blocked = self._attack_counts()
+            with self.state._lock:
+                confusion = dict(self.state.confusion) if self.state.ground_truth else None
+                detection_latency = self.state.detection_latency
 
             # Protection OFF used to report a fabricated 0 for both. The relay now
             # records these readings as research data, so send the real numbers and
@@ -694,6 +763,8 @@ class TelemetryEngine(threading.Thread):
                 attack_detected=attack_detected,
                 attack_blocked=attack_blocked,
                 enforcement=self.state.enforcer.mode if self.state.enforcer else "simulated",
+                confusion=confusion,
+                detection_latency=detection_latency,
             )
 
 
@@ -746,6 +817,7 @@ class SentiNetDaemon:
             on_blacklist_update=self.state.add_to_blacklist,
             agent_info=agent_info,
             recent_events_provider=lambda: self.state.events_tail(20),
+            on_ground_truth=self.state.set_ground_truth,
         )
         self.capture = CaptureEngine(self.state, self.ml_engine, self.bayanihan_client)
         self.telemetry = TelemetryEngine(self.state, self.bayanihan_client)
@@ -786,13 +858,27 @@ class SentiNetDaemon:
                     self.state.gateway = (gateway_ip, normalise_mac(gateway_mac))
         except Exception as exc:
             print(f"[SentiNet Daemon] Could not resolve the gateway's MAC: {exc}")
-        resolved = {m for m in (normalise_mac(mac) for mac in macs) if m}
+        # The relay, when it is a machine on this same network: blocking it
+        # would sever this agent from Tier 3 while leaving protection "on". (A
+        # relay on another network is reached through the gateway, and one on
+        # this machine is this machine — both already covered above.)
+        relay_ip = None
+        try:
+            relay_ip = socket.gethostbyname(urlparse(RELAY_URL).hostname or "")
+            if not ipaddress.ip_address(relay_ip).is_loopback:
+                # First answer only, as for the gateway.
+                if self.state.relay_mac is None:
+                    self.state.relay_mac = normalise_mac(scapy.getmacbyip(relay_ip))
+                macs.add(self.state.relay_mac)
+        except Exception as exc:
+            print(f"[SentiNet Daemon] Could not resolve the relay's MAC: {exc}")
+        resolved = {m for m in (normalise_mac(mac) for mac in macs if mac) if m}
         with self.state._lock:
             before = set(self.state.never_block)
             self.state.never_block |= resolved
             added = self.state.never_block - before
         if added:
-            print(f"[SentiNet Daemon] Never blacklisting (this host / gateway {gateway_ip}): "
+            print(f"[SentiNet Daemon] Never blacklisting (this host / gateway {gateway_ip} / relay {relay_ip}): "
                   f"{', '.join(sorted(added))}")
 
     def _snapshot_for_tray(self) -> Dict[str, Any]:

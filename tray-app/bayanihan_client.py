@@ -107,10 +107,14 @@ class BayanihanClient:
     own local dashboard.
     """
     def __init__(self, relay_url="http://localhost:8771", on_blacklist_update=None, agent_info=None,
+                 on_ground_truth: Optional[Callable[[list], None]] = None,
                  recent_events_provider: Optional[Callable[[], list]] = None,
                  pending_store_path: str = PENDING_REPORTS_DB_PATH):
         self.relay_url = relay_url
         self.on_blacklist_update = on_blacklist_update
+        # Called with the attacker MAC(s) declared for this run, which the relay
+        # sends on connect — used only to score the live confusion matrix.
+        self.on_ground_truth = on_ground_truth
         self.agent_info = agent_info or {}
         # Called at connect time to attach a short tail of this agent's own
         # recent detections to register_agent, so the relay can backfill any
@@ -228,6 +232,11 @@ class BayanihanClient:
                         })
                     except Exception as exc:
                         print(f"[BayanihanClient] Could not report enforcement of {mac}: {exc}")
+
+        @self.sio.event
+        def sop_ground_truth(data):
+            if self.on_ground_truth:
+                self.on_ground_truth((data or {}).get("attackerMacs") or [])
 
         @self.sio.event
         def blacklist_sync(data):
@@ -408,7 +417,8 @@ class BayanihanClient:
                        ram_mb: float = None, protected: bool = None,
                        scenario: str = None, ram_process_percent: float = None,
                        attack_detected: int = None, attack_blocked: int = None,
-                       enforcement: str = None):
+                       enforcement: str = None, confusion: dict = None,
+                       detection_latency: dict = None):
         """
         Report resource consumption to the relay.
 
@@ -444,6 +454,12 @@ class BayanihanClient:
                     payload["attackBlocked"] = attack_blocked or 0
                 if enforcement:
                     payload["enforcement"] = enforcement
+                # Live confusion matrix tallies (only while an attacker is
+                # declared), and how long the latest detection took.
+                if confusion is not None:
+                    payload["confusion"] = confusion
+                if detection_latency:
+                    payload["detectionLatency"] = detection_latency
                 self.sio.emit("telemetry_report", payload)
             except Exception as e:
                 pass

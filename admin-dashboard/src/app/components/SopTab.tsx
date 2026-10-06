@@ -19,7 +19,8 @@ interface SopCard {
   key: string;
   title: string;
   groups: SopGroup[];
-  footer: string;
+  // One entry per line.
+  footer: string | string[];
 }
 
 const ROW_COLS: Record<number, string> = {
@@ -60,16 +61,42 @@ function buildCards(summary: SopSummary | null): SopCard[] {
   const ttb = summary?.timeToBlock;
   const trial = ttb?.latest;
 
-  const count = (value: number | null | undefined) => (value == null ? null : String(value));
-  const detectionParts: string[] = [];
-  if (evaluation) {
-    detectionParts.push(`Held-out test set · n = ${evaluation.n} windows · threshold ${evaluation.threshold.toFixed(2)}`);
+  const count = (value: number | null | undefined) => (value == null ? null : value.toLocaleString());
+
+  // With an attacker declared for the run the matrix is the live one: the
+  // agent's verdict on each packet against that ground truth. Otherwise it is
+  // the model's result on the held-out test set, which in live mode drops to a
+  // line of its own underneath.
+  const attackerMacs = detection?.attackerMacs ?? [];
+  const liveMode = attackerMacs.length > 0;
+  const live = detection?.live;
+  const matrix = liveMode ? live : evaluation;
+  const latency = detection?.latency;
+  const latencyText = latency
+    ? `last detection after ${latency.packets} packets, ${(latency.ms / 1000).toFixed(2)} s`
+    : null;
+
+  const detectionLines: string[] = [];
+  if (liveMode) {
+    const run = [`Live run · attacker ${attackerMacs.join(', ')}`];
+    run.push(live ? `n = ${live.n.toLocaleString()} packets` : "waiting for the agent's counts");
+    if (latencyText) run.push(latencyText);
+    detectionLines.push(run.join(' · '));
+    if (evaluation) {
+      detectionLines.push(
+        `Model validation · ${evaluation.accuracy.toFixed(2)}% accuracy on ${evaluation.n} held-out windows · threshold ${evaluation.threshold.toFixed(2)}`,
+      );
+    }
+  } else if (evaluation) {
+    const validation = [`Held-out test set · n = ${evaluation.n} windows · threshold ${evaluation.threshold.toFixed(2)}`];
+    if (latencyText) validation.push(latencyText);
+    detectionLines.push(validation.join(' · '));
   }
   if (detection?.totalDetectedAttacks != null) {
-    detectionParts.push(
+    detectionLines.push(
       detection.enforcement === 'simulated'
-        ? "attack packets counted live · this agent's OS cannot drop packets, so none are blocked"
-        : 'attack packets counted live · blocked = dropped by the kernel',
+        ? "Prevention · attack packets counted live · this agent's OS cannot drop packets, so none are blocked"
+        : 'Prevention · attack packets counted live · blocked = dropped by the kernel',
     );
   }
 
@@ -117,12 +144,16 @@ function buildCards(summary: SopSummary | null): SopCard[] {
       groups: [{
         rows: [
           [
-            { label: 'True Positives', value: count(evaluation?.truePositives) },
-            { label: 'False Positives', value: count(evaluation?.falsePositives) },
-            { label: 'True Negatives', value: count(evaluation?.trueNegatives) },
-            { label: 'False Negatives', value: count(evaluation?.falseNegatives) },
+            { label: 'True Positives', value: count(matrix?.truePositives) },
+            { label: 'False Positives', value: count(matrix?.falsePositives) },
+            { label: 'True Negatives', value: count(matrix?.trueNegatives) },
+            { label: 'False Negatives', value: count(matrix?.falseNegatives) },
           ],
-          [{ label: 'Accuracy', unit: '%', value: fixed(evaluation?.accuracy, 2) }],
+          [
+            { label: 'Accuracy', unit: '%', value: fixed(matrix?.accuracy, 2) },
+            { label: 'Detection Rate', unit: '%', value: fixed(matrix?.detectionRate, 2) },
+            { label: 'False Positive Rate', unit: '%', value: fixed(matrix?.falsePositiveRate, 2) },
+          ],
           [
             { label: 'Blocked Attacks', value: count(detection?.blockedAttacks) },
             { label: 'Total Detected Attacks', value: count(detection?.totalDetectedAttacks) },
@@ -130,7 +161,7 @@ function buildCards(summary: SopSummary | null): SopCard[] {
           ],
         ],
       }],
-      footer: detectionParts.length > 0 ? detectionParts.join(' · ') : AWAITING,
+      footer: detectionLines.length > 0 ? detectionLines : AWAITING,
     },
     {
       key: 'SOP 3',
@@ -213,7 +244,9 @@ export default function SopTab() {
             </div>
 
             <div className="border-t border-[#e2e8f0] p-3 px-4 text-[10px] text-[#94A3B8] uppercase tracking-widest">
-              {sop.footer}
+              {(Array.isArray(sop.footer) ? sop.footer : [sop.footer]).map((line, i) => (
+                <div key={i} className={i > 0 ? 'mt-1' : undefined}>{line}</div>
+              ))}
             </div>
           </section>
         ))}

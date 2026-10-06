@@ -49,6 +49,26 @@ TELEMETRY_SCENARIO = os.getenv('TELEMETRY_SCENARIO', '')
 # Record readings at all. Off means the dashboards still work, nothing is stored.
 TELEMETRY_RECORD = os.getenv('TELEMETRY_RECORD', 'true').lower() == 'true'
 
+# ─── Live confusion matrix (SOP 2) ──────────────────────────────────────────
+# The MAC address(es) of the attacker for this run, declared up front:
+#     ./launch_scripts/start_relay_node.sh --attacker ce:d6:36:4d:0a:9f
+# A confusion matrix needs to know what each packet really was, independently
+# of what the agent decided about it. On a controlled testbed that is known —
+# the attack generator is the attacker, everything else is benign — so it is
+# stated here and handed to the agents to score against. Comma-separated for
+# more than one. Empty means no live matrix; the SOP tab then shows the model's
+# held-out test set figures only.
+def _parse_macs(raw: str) -> list:
+    macs = []
+    for part in raw.replace(';', ',').split(','):
+        mac = part.strip().lower().replace('-', ':')
+        if len(mac) == 17 and mac.count(':') == 5 and mac not in macs:
+            macs.append(mac)
+    return macs
+
+
+SOP_ATTACKER_MACS = _parse_macs(os.getenv('SOP_ATTACKER_MACS', ''))
+
 # MultiChain JSON-RPC
 MULTICHAIN_ENABLED = os.getenv('MULTICHAIN_ENABLED', 'true').lower() == 'true'
 MULTICHAIN_RPC_URL = os.getenv('MULTICHAIN_RPC_URL', 'http://127.0.0.1:4365')
