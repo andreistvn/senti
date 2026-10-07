@@ -11,8 +11,9 @@ Create or change an account from the admin-backend folder:
     python auth.py set ADM-7734-ALPHA      (prompts for the password twice)
     python auth.py list
 
-start_relay_node.sh / .bat run `set` for you the first time, when no account
-exists yet.
+Normally you need neither: when the relay starts it creates the account named
+by ADMIN_DIGITAL_ID / ADMIN_PASSWORD in admin-backend/.env, and updates its
+password if that line changes. Use `set` only if you leave ADMIN_PASSWORD empty.
 """
 
 from __future__ import annotations
@@ -87,6 +88,28 @@ def set_password(digital_id: str, password: str) -> None:
         "updated": time.strftime("%Y-%m-%d %H:%M:%S"),
     }
     _save(accounts)
+
+
+def ensure_account(digital_id: str, password: str) -> Optional[str]:
+    """
+    Make sure the account configured in .env exists with that password.
+
+    Called when the relay starts. Returns a line describing what was done, or
+    None if the account was already in place (or none is configured). The
+    password itself is never written to the accounts file — only its hash.
+    """
+    digital_id = (digital_id or "").strip()
+    if not digital_id or not password:
+        return None
+    if verify(digital_id, password):
+        return None
+    existed = digital_id in _load()
+    try:
+        set_password(digital_id, password)
+    except ValueError as exc:
+        return f"could not set up administrator {digital_id} from .env: {exc}"
+    return (f"administrator {digital_id} "
+            f"{'password updated' if existed else 'account created'} from admin-backend/.env")
 
 
 # Checked against for an unknown digital ID, so a wrong ID takes as long as a

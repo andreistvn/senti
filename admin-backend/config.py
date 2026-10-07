@@ -20,6 +20,11 @@ ADMIN_CORS_ORIGINS = [
 ]
 
 # Session/auth
+# The administrator account the relay keeps in place (see auth.ensure_account).
+# Both empty means accounts are managed by hand with `python auth.py set`.
+ADMIN_DIGITAL_ID = os.getenv('ADMIN_DIGITAL_ID', '').strip()
+ADMIN_PASSWORD = os.getenv('ADMIN_PASSWORD', '')
+
 # A session ends after this long without a request (the dashboard polls every
 # few seconds, so an open dashboard stays signed in)...
 SESSION_TIMEOUT_SECONDS = int(os.getenv('SESSION_TIMEOUT_SECONDS', '3600'))

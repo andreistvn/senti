@@ -248,6 +248,16 @@ updates = {
     ]),
 }
 
+# This file was just reset to .env.example. Carry over the administrator account
+# from the previous .env, so a changed ID or password survives a relaunch.
+try:
+    for old_line in open(path + '.bak').read().splitlines():
+        key, sep, value = old_line.strip().partition('=')
+        if sep and key.strip() in ('ADMIN_DIGITAL_ID', 'ADMIN_PASSWORD') and value.strip():
+            updates[key.strip()] = value.strip()
+except OSError:
+    pass
+
 lines = open(path).read().splitlines()
 seen = set()
 
@@ -306,17 +316,8 @@ start_service() {
 }
 
 echo "[3/4] Starting admin backend (relay)..."
-# Nobody can sign in to the admin dashboard until an administrator account
-# exists, so create one the first time (auth.py stores only a password hash).
-if [ ! -s "$ROOT/admin-backend/admin_credentials.json" ]; then
-    echo ""
-    echo "      No administrator account on this relay yet. Create one now:"
-    ( cd "$ROOT/admin-backend" && python3 auth.py set ) || {
-        echo "ERROR: no administrator account was created. Run: cd admin-backend && python3 auth.py set"
-        exit 1
-    }
-    echo ""
-fi
+# The relay creates the administrator account itself from ADMIN_DIGITAL_ID /
+# ADMIN_PASSWORD in admin-backend/.env — nothing to set up here.
 start_service "admin_backend" "admin-backend" "python3 main.py"
 
 if [ "${SKIP_DASHBOARD:-0}" != "1" ]; then

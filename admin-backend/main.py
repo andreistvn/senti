@@ -40,9 +40,13 @@ async def lifespan(_app: FastAPI):
     """Bring the MultiChain ledger worker up with the server and down with it."""
     state.start_ledger_worker()
     state.start_telemetry_sampler()
+    done = auth.ensure_account(config.ADMIN_DIGITAL_ID, config.ADMIN_PASSWORD)
+    if done:
+        print(f'[Auth] {done}', flush=True)
     if not auth.has_accounts():
         print('[Auth] WARNING: no administrator account exists, so nobody can sign in.')
-        print('[Auth]          Create one:  cd admin-backend && python auth.py set <digital-id>')
+        print('[Auth]          Set ADMIN_DIGITAL_ID and ADMIN_PASSWORD in admin-backend/.env and restart,')
+        print('[Auth]          or run:  cd admin-backend && python auth.py set <digital-id>', flush=True)
     yield
     state.stop_telemetry_sampler()
     state.stop_ledger_worker()
@@ -147,8 +151,8 @@ async def login(req: LoginRequest, request: Request):
     if not auth.has_accounts():
         raise HTTPException(
             status_code=503,
-            detail='No administrator account is set up on this relay. '
-                   'Run "python auth.py set <digital-id>" in admin-backend.',
+            detail='No administrator account is set up on this relay. Set ADMIN_DIGITAL_ID '
+                   'and ADMIN_PASSWORD in admin-backend/.env and restart the relay.',
         )
 
     client = request.client.host if request.client else 'unknown'
