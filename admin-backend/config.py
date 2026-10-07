@@ -20,7 +20,11 @@ ADMIN_CORS_ORIGINS = [
 ]
 
 # Session/auth
-SESSION_TIMEOUT_SECONDS = 3600
+# A session ends after this long without a request (the dashboard polls every
+# few seconds, so an open dashboard stays signed in)...
+SESSION_TIMEOUT_SECONDS = int(os.getenv('SESSION_TIMEOUT_SECONDS', '3600'))
+# ...and after this long regardless, so a stolen session cookie does not last forever.
+SESSION_MAX_AGE_SECONDS = int(os.getenv('SESSION_MAX_AGE_SECONDS', str(12 * 3600)))
 
 # Agents list (GET /agents, the "Protected Devices" panel). An agent's row is
 # refreshed on every register_agent/telemetry_report it sends (roughly once a

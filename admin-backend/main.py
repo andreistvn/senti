@@ -2,7 +2,7 @@
 SentiNet Admin Backend API Server.
 
 Implements the contract endpoints for the admin dashboard:
-- POST /auth/login — authenticate with digital ID
+- POST /auth/login — authenticate with digital ID and password
 - POST /auth/logout — end session
 - GET /auth/me — get current session
 - GET /agents — list all agents
@@ -16,19 +16,22 @@ Implements the contract endpoints for the admin dashboard:
 - GET /telemetry/summary — get telemetry + blockchain metrics
 - GET /telemetry/readings — recorded CPU/RAM samples for analysis
 - GET /sop/summary — SentiNet's figures for each Statement-of-the-Problem question
-- GET /analytics/threat-volume — get threat volume history
+- GET /analytics/traffic — per-agent ARP traffic and detections for the Analytics tab
 """
 
+import asyncio
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Cookie, Response
+from fastapi import FastAPI, HTTPException, Cookie, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 import config
 import state
+import analytics
+import auth
 import socketio
 
 
@@ -37,6 +40,9 @@ async def lifespan(_app: FastAPI):
     """Bring the MultiChain ledger worker up with the server and down with it."""
     state.start_ledger_worker()
     state.start_telemetry_sampler()
+    if not auth.has_accounts():
+        print('[Auth] WARNING: no administrator account exists, so nobody can sign in.')
+        print('[Auth]          Create one:  cd admin-backend && python auth.py set <digital-id>')
     yield
     state.stop_telemetry_sampler()
     state.stop_ledger_worker()
@@ -61,6 +67,7 @@ socket_app = socketio.ASGIApp(sio, app)
 
 class LoginRequest(BaseModel):
     digitalId: str
+    password: str
 
 
 class PolicyConfigRequest(BaseModel):
@@ -128,37 +135,49 @@ class TelemetrySummaryResponse(BaseModel):
     totalIncidents: int
 
 
-class ThreatPointResponse(BaseModel):
-    time: str
-    pps: int
-    blocked: int
-
-
 # ─── Auth Endpoints ────────────────────────────────────────────────────────
 
 @app.post('/auth/login', response_model=SessionResponse)
-async def login(req: LoginRequest):
-    """Authenticate with digital ID and password (MFA done client-side)."""
-    digital_id = req.digitalId
-    
-    # Validate digital ID format
-    if digital_id not in state.ADMIN_CREDENTIALS:
-        raise HTTPException(status_code=401, detail='Invalid credentials')
-    
-    # Create session
+async def login(req: LoginRequest, request: Request):
+    """
+    Sign in with a digital ID and password, checked against the hashed accounts
+    in admin_credentials.json (see auth.py). Success sets an HttpOnly session
+    cookie; every other admin endpoint requires it.
+    """
+    if not auth.has_accounts():
+        raise HTTPException(
+            status_code=503,
+            detail='No administrator account is set up on this relay. '
+                   'Run "python auth.py set <digital-id>" in admin-backend.',
+        )
+
+    client = request.client.host if request.client else 'unknown'
+    wait = auth.locked_out_for(req.digitalId, client)
+    if wait:
+        raise HTTPException(
+            status_code=429,
+            detail=f'Too many failed attempts. Try again in {(wait + 59) // 60} minute(s).',
+        )
+
+    # PBKDF2 is deliberately slow; keep it off the event loop that also carries
+    # the agents' Socket.IO traffic.
+    ok = await asyncio.to_thread(auth.verify, req.digitalId, req.password)
+    auth.record_attempt(req.digitalId, client, ok)
+    if not ok:
+        # Deliberately the same message whichever of the two was wrong.
+        raise HTTPException(status_code=401, detail='Invalid digital ID or password.')
+
+    digital_id = req.digitalId.strip()
     session_token = state.create_session(digital_id)
-    
-    # Return response with session cookie
-    response = JSONResponse(
-        content={'authenticated': True, 'digitalId': digital_id},
-        status_code=200,
-    )
+    response = JSONResponse(content={'authenticated': True, 'digitalId': digital_id}, status_code=200)
     response.set_cookie(
         key='sentinet_admin_session',
         value=session_token,
-        httponly=True,
-        secure=False,  # set to True in production
+        max_age=config.SESSION_MAX_AGE_SECONDS,
+        httponly=True,       # not readable from page scripts
+        secure=False,        # the testbed serves plain HTTP; set True behind HTTPS
         samesite='lax',
+        path='/',
     )
     return response
 
@@ -389,20 +408,20 @@ async def get_telemetry_summary(sentinet_admin_session: Optional[str] = Cookie(N
 
 # ─── Analytics Endpoints ────────────────────────────────────────────────────
 
-@app.get('/analytics/threat-volume', response_model=List[ThreatPointResponse])
-async def get_threat_volume(sentinet_admin_session: Optional[str] = Cookie(None)):
-    """Get threat volume history for analytics."""
+@app.get('/analytics/traffic')
+async def get_traffic_analytics(sentinet_admin_session: Optional[str] = Cookie(None)):
+    """
+    The Analytics tab: per-agent ARP packet and Tier-1 block rates for the last
+    few minutes, totals per hour / day, and detections per hour.
+    """
     if not sentinet_admin_session:
         raise HTTPException(status_code=401, detail='Not authenticated')
-    
+
     digital_id = state.validate_session(sentinet_admin_session)
     if not digital_id:
         raise HTTPException(status_code=401, detail='Session expired')
-    
-    return state.get_threat_history()
 
-
-# ─── Health Check ────────────────────────────────────────────────────────────
+    return analytics.get_analytics()
 
 @app.get('/health')
 async def health():
@@ -456,6 +475,7 @@ async def disconnect(sid):
 
     mac_to_sid.pop(mac, None)
     state.remove_agent(mac)
+    analytics.forget(mac)
 
 def _agent_delay_ms(sent_at_ms: Any, stamped_at_ms: Any) -> Optional[float]:
     """
@@ -624,6 +644,11 @@ async def telemetry_report(sid, data):
             enforcement=data.get("enforcement"),
             confusion=data.get("confusion"),
             detection_latency=data.get("detectionLatency"),
+        )
+        # Running ARP packet counts, for the Analytics tab.
+        analytics.record(
+            mac, state.agent_name_for(mac) or mac,
+            data.get("arpInspected"), data.get("arpBlocked"), data.get("enforcement"),
         )
 
 @sio.event
