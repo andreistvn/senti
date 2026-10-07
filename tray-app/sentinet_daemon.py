@@ -741,6 +741,8 @@ class TelemetryEngine(threading.Thread):
             with self.state._lock:
                 confusion = dict(self.state.confusion) if self.state.ground_truth else None
                 detection_latency = self.state.detection_latency
+                arp_inspected = self.state.inspected
+                arp_blocked = self.state.blocked
 
             # Protection OFF used to report a fabricated 0 for both. The relay now
             # records these readings as research data, so send the real numbers and
@@ -765,6 +767,8 @@ class TelemetryEngine(threading.Thread):
                 enforcement=self.state.enforcer.mode if self.state.enforcer else "simulated",
                 confusion=confusion,
                 detection_latency=detection_latency,
+                arp_inspected=arp_inspected,
+                arp_blocked=arp_blocked,
             )
 
 
