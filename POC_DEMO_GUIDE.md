@@ -216,7 +216,7 @@ sudo python3 attack_generator.py poison --target 192.168.10.21 --gateway 192.168
 ### 4b. High-volume ARP flood (~1,000 PPS → Tier 1 / Tier 2)
 
 ```bash
-sudo python3 attack_generator.py flood --target 192.168.10.21
+sudo python3 attack_generator.py flood --target 192.168.10.21 --gateway 192.168.10.1
 ```
 
 ### What to watch — the collaborative defense

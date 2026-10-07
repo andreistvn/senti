@@ -77,4 +77,10 @@ FLOOD_PPS_THRESHOLD = float(os.environ.get("SENTINET_FLOOD_PPS_THRESHOLD", "100"
 # How often, at most, the kernel's drop counter is read while an attack is being
 # blocked (SOP 2's "blocked attacks"). Each read runs a system command.
 KERNEL_COUNTER_REFRESH_SECONDS = float(os.environ.get("SENTINET_KERNEL_COUNTER_REFRESH", "5.0"))
+# An attack does not arrive at a perfectly steady rate — over Wi-Fi especially it
+# comes in bursts with gaps — so the measured rate dips under a cut-off for a few
+# seconds while the attack is still running. The label only steps DOWN (flooding
+# -> poisoning -> normal) once the rate has stayed down for this long; it steps
+# up immediately. Without this the label flickers between scenarios mid-attack.
+SCENARIO_HOLD_SECONDS = float(os.environ.get("SENTINET_SCENARIO_HOLD", "15.0"))
 SCENARIO_WINDOW_SECONDS = float(os.environ.get("SENTINET_SCENARIO_WINDOW", "5.0"))

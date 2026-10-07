@@ -186,7 +186,7 @@ cd traffic-gen
 python3 benign_traffic.py
 
 # Simulate a high-volume ARP flood attack (~1,000 PPS):
-python3 attack_generator.py flood --target <TARGET_IP>
+python3 attack_generator.py flood --target <TARGET_IP> --gateway <GATEWAY_IP>
 
 # Simulate a targeted Man-in-the-Middle (MITM) ARP poisoning attack:
 python3 attack_generator.py poison --target <TARGET_IP> --gateway <GATEWAY_IP>
