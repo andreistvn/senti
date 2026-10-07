@@ -6,7 +6,14 @@
 :: 2. Generates admin-backend\.env from the node's real RPC credentials
 :: 3. Starts the FastAPI relay + admin dashboard in separate windows
 ::
-:: Usage:  launch_scripts\start_relay_node.bat
+:: Usage:  launch_scripts\start_relay_node.bat [--attacker MAC [MAC ...]]
+::
+::   --attacker   MAC address of the attack generator for this run. Declares the
+::                ground truth for the SOP tab's live confusion matrix: packets
+::                from this MAC are attacks, all others are benign. Use the MAC
+::                the victims see - on the attacker run "ipconfig /all" and read
+::                "Physical Address" of its Wi-Fi adapter (dashes are fine).
+::                Without it the SOP tab shows the model's test-set figures only.
 ::
 :: Environment overrides:
 ::   CHAIN_NAME=sentinet     MultiChain chain name
@@ -25,6 +32,48 @@ if "%BIND_HOST%"=="" set "BIND_HOST=0.0.0.0"
 if "%REQUIRE_CHAIN%"=="" set "REQUIRE_CHAIN=0"
 set "CHAIN_DIR=%APPDATA%\MultiChain\%CHAIN_NAME%"
 
+:: --- Options ------------------------------------------------------------------
+:: Parsed with labels rather than inside ( ) blocks, because %1 does not follow
+:: SHIFT inside a block. cmd also splits arguments on commas, so several MACs
+:: arrive as several arguments whether typed with commas or spaces.
+set "ATTACKER_MACS=%SOP_ATTACKER_MACS%"
+:parse_args
+if "%~1"=="" goto args_done
+if /I "%~1"=="--attacker" goto take_attacker
+echo ERROR: unknown option '%~1'.
+echo Usage: launch_scripts\start_relay_node.bat [--attacker MAC [MAC ...]]
+exit /b 1
+
+:take_attacker
+shift
+if "%~1"=="" goto attacker_missing
+set "ATTACKER_MACS="
+:attacker_next
+set "ARG=%~1"
+if "%ARG%"=="" goto parse_args
+if "%ARG:~0,2%"=="--" goto parse_args
+:: Catch a typo here rather than as a confusion matrix that quietly counts the
+:: real attacker's packets as false positives.
+:: ipconfig prints MACs with dashes; use colons throughout.
+set "ARG=%ARG:-=:%"
+echo %ARG%| findstr /R /I /C:"^[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]:[0-9a-f][0-9a-f]$" >nul
+if errorlevel 1 goto attacker_bad
+if defined ATTACKER_MACS (set "ATTACKER_MACS=%ATTACKER_MACS%,%ARG%") else (set "ATTACKER_MACS=%ARG%")
+shift
+goto attacker_next
+
+:attacker_missing
+echo ERROR: --attacker needs a MAC address, e.g. --attacker CE-D6-36-4D-0A-9F
+exit /b 1
+
+:attacker_bad
+echo ERROR: '%ARG%' is not a MAC address ^(expected the form CE-D6-36-4D-0A-9F^).
+exit /b 1
+
+:args_done
+:: The relay reads this; the backend window started below inherits it.
+set "SOP_ATTACKER_MACS=%ATTACKER_MACS%"
+
 :: The relay is useful without a chain: detection, blacklist broadcast and both
 :: dashboards work, only the ledger is unavailable. So a missing node degrades
 :: instead of aborting - set REQUIRE_CHAIN=1 (demo day) to make it fatal.
@@ -33,6 +82,11 @@ set "CHAIN_AVAILABLE=1"
 echo.
 echo SentiNet - Starting RELAY NODE
 echo Repository: %ROOT%
+if defined SOP_ATTACKER_MACS (
+    echo Attacker ^(ground truth for the live confusion matrix^): %SOP_ATTACKER_MACS%
+) else (
+    echo No --attacker given: the SOP tab will show test-set figures only.
+)
 echo.
 
 :: --- 1. MultiChain node --------------------------------------------------
