@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
 import { toast, Toaster } from 'sonner';
-import ThreatAnalyticsTab, { ThreatDataPoint } from './ThreatAnalyticsTab';
+import ThreatAnalyticsTab from './ThreatAnalyticsTab';
 import PolicyTab, { PolicyConfig, AgentHealth } from './PolicyTab';
 import SopTab from './SopTab';
 import { getAdminDashboardSeed, getAdminDashboardSeedFallback } from '../lib/adminApi';
@@ -82,7 +82,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     lastSyncTime: adminSeed.blockchainMetrics.lastSyncTime,
   });
 
-  const [threatHistory, setThreatHistory] = useState<ThreatDataPoint[]>(adminSeed.threatHistory);
 
   const [policyConfig, setPolicyConfig] = useState<PolicyConfig>(adminSeed.policyConfig);
 
@@ -103,7 +102,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       setBlacklist(seed.blacklist);
       setTelemetry(seed.telemetry);
       setBlockchainMetrics(seed.blockchainMetrics);
-      setThreatHistory(seed.threatHistory);
       setPolicyConfig(seed.policyConfig);
     })();
 
@@ -160,7 +158,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       setBlacklist(seed.blacklist);
         setTelemetry(seed.telemetry);
         setBlockchainMetrics(seed.blockchainMetrics);
-        setThreatHistory(seed.threatHistory);
         setPolicyConfig(seed.policyConfig);
         
         // Let's only update logs if they are significantly different to avoid overwriting manual local logs completely
@@ -277,7 +274,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       <main className="flex-1 p-4 flex flex-col gap-4 overflow-auto">
       {/* ── Analytics Tab ── */}
       {activeTab === 'analytics' && (
-        <ThreatAnalyticsTab data={threatHistory} arpFloodLimit={policyConfig.arpFloodLimit} />
+        <ThreatAnalyticsTab />
       )}
 
       {/* ── Policy Tab ── */}

@@ -1,21 +1,21 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
-  ReferenceLine, ResponsiveContainer, BarChart, Bar, Legend,
+  ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, BarChart, Bar, Legend,
 } from 'recharts';
+import { getTrafficAnalytics, type TrafficAnalytics } from '../lib/adminApi';
 
-export interface ThreatDataPoint {
-  time: string;
-  pps: number;
-  blocked: number;
-}
+// Every figure on this tab comes from the agents' own ARP packet counts, sent
+// with their telemetry (see admin-backend/analytics.py). "Blocked" is a Tier-1
+// hit: the sender was on the blacklist. A Linux agent's kernel also drops it; a
+// Windows or macOS agent can only count it, which the agent table says.
 
-interface Props {
-  data: ThreatDataPoint[];
-  arpFloodLimit: number;
-}
+const POLL_MS = 2000;
+// One colour per agent line, after the blue total and red blocked series.
+const AGENT_COLOURS = ['#0EA5E9', '#16A34A', '#F59E0B', '#7C3AED', '#DB2777', '#0F766E'];
 
-// Removed generateMockData and HOURLY_DATA to rely purely on backend telemetry
+const AXIS_TICK = { fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' };
+const LEGEND_STYLE = { fontSize: 10, fontFamily: 'JetBrains Mono', textTransform: 'uppercase' as const, letterSpacing: '0.1em' };
 
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
@@ -23,208 +23,224 @@ const CustomTooltip = ({ active, payload, label }: any) => {
     <div className="bg-[#0F172A] border-2 border-[#334155] p-3 font-['JetBrains_Mono',_monospace] text-xs">
       <p className="text-[#94A3B8] mb-1">{label}</p>
       {payload.map((p: any) => (
-        <p key={p.name} style={{ color: p.color }}>{p.name}: {p.value.toLocaleString()}</p>
+        <p key={p.name} style={{ color: p.color }}>{p.name}: {Number(p.value).toLocaleString()}</p>
       ))}
     </div>
   );
 };
 
-export default function ThreatAnalyticsTab({ data, arpFloodLimit }: Props) {
-  // Use actual data from backend
-  const displayData = data || [];
+function clock(ms: number) {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
 
-  const peakPPS    = useMemo(() => Math.max(...displayData.map(d => d.pps)), [displayData]);
-  const avgPPS     = useMemo(() => Math.round(displayData.reduce((s, d) => s + d.pps, 0) / Math.max(displayData.length, 1)), [displayData]);
-  const currentPPS = displayData[displayData.length - 1]?.pps ?? 0;
-  const isOverLimit = currentPPS >= arpFloodLimit;
+function Section({ title, note, children, height }: { title: string; note?: string; children: React.ReactNode; height?: number }) {
+  return (
+    <section className="border border-[#cccccc] bg-white flex flex-col">
+      <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
+        {title}
+        {note && <span className="ml-auto font-normal text-[10px] text-[#94A3B8] uppercase tracking-widest">{note}</span>}
+      </div>
+      <div className="p-4" style={height ? { height } : undefined}>{children}</div>
+    </section>
+  );
+}
+
+function Empty({ text }: { text: string }) {
+  return (
+    <div className="h-full min-h-[80px] flex items-center justify-center text-[10px] uppercase tracking-widest text-[#94A3B8]">
+      {text}
+    </div>
+  );
+}
+
+export default function ThreatAnalyticsTab() {
+  const [data, setData] = useState<TrafficAnalytics | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [period, setPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily');
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      const next = await getTrafficAnalytics();
+      if (!alive) return;
+      setData(next);
+      setLoaded(true);
+    };
+    void load();
+    const poll = setInterval(load, POLL_MS);
+    return () => {
+      alive = false;
+      clearInterval(poll);
+    };
+  }, []);
+
+  const agents = data?.agents ?? [];
+  const session = data?.session;
+
+  // Recharts wants one flat row per point; agent MACs become stable keys.
+  const agentKeys = useMemo(
+    () => agents.map((a, i) => ({ ...a, key: `agent_${i}`, colour: AGENT_COLOURS[i % AGENT_COLOURS.length] })),
+    [agents],
+  );
+  const liveRows = useMemo(
+    () => (data?.live ?? []).map(point => {
+      const row: Record<string, number | string> = { time: clock(point.t), pps: point.pps, blocked: point.blocked };
+      agentKeys.forEach(a => { row[a.key] = point.agents[a.mac] ?? 0; });
+      return row;
+    }),
+    [data, agentKeys],
+  );
+
+  const periodRows = data ? data[period] : [];
+  const periodLabel = { daily: 'per hour, last 24 hours', weekly: 'per day, last 7 days', monthly: 'per day, last 30 days' }[period];
 
   const statCards = [
-    { label: 'Current ARP PPS',       value: currentPPS, unit: 'pps',       alert: isOverLimit },
-    { label: 'Peak PPS (Session)',    value: peakPPS,    unit: 'pps',       alert: peakPPS >= arpFloodLimit },
-    { label: 'Avg PPS (Session)',     value: avgPPS,     unit: 'pps',       alert: false },
-    { label: 'Alert Threshold',       value: arpFloodLimit, unit: 'pps limit', alert: false },
+    { label: 'ARP Traffic Now', value: session?.currentPps, unit: 'packets / s, all agents' },
+    { label: 'Blocked Now', value: session?.currentBlockedPps, unit: 'blocks / s, all agents' },
+    { label: 'Peak Traffic', value: session?.peakPps, unit: 'packets / s, since relay start' },
+    { label: 'Average Traffic', value: session?.avgPps, unit: 'packets / s, since relay start' },
   ];
 
-  const [period, setPeriod] = useState<'daily'|'weekly'|'monthly'>('daily');
-
-  const hourlyProfile = useMemo(() => {
-    const buckets = Array.from({ length: 24 }, (_, i) => ({ hour: i, label: String(i).padStart(2, '0') + ':00', pps: 0, count: 0 }));
-    displayData.forEach(d => {
-      const dt = new Date(d.time);
-      if (isNaN(dt.getTime())) return;
-      const h = dt.getUTCHours();
-      buckets[h].pps += d.pps;
-      buckets[h].count += 1;
-    });
-    return buckets.map(b => ({ hour: b.hour, label: b.label, pps: b.count ? Math.round(b.pps / b.count) : 0 }));
-  }, [displayData]);
-
-  const weekdayProfile = useMemo(() => {
-    const names = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const buckets = names.map((n, i) => ({ day: i, label: n, pps: 0 }));
-    displayData.forEach(d => {
-      const dt = new Date(d.time);
-      if (isNaN(dt.getTime())) return;
-      const day = dt.getUTCDay();
-      buckets[day].pps += d.pps;
-    });
-    return buckets.map(b => ({ day: b.day, label: b.label, pps: b.pps }));
-  }, [displayData]);
-
-  const monthlyProfile = useMemo(() => {
-    const buckets = Array.from({ length: 30 }, (_, i) => ({ day: i + 1, label: `Day ${i + 1}`, pps: 0, count: 0 }));
-    displayData.forEach(d => {
-      const dt = new Date(d.time);
-      if (isNaN(dt.getTime())) return;
-      let day = dt.getUTCDate() - 1;
-      if (day > 29) day = 29;
-      buckets[day].pps += d.pps;
-      buckets[day].count += 1;
-    });
-    return buckets.map(b => ({ day: b.day, label: b.label, pps: b.count ? Math.round(b.pps / b.count) : 0 }));
-  }, [displayData]);
+  if (loaded && !data) {
+    return (
+      <section className="border border-[#cccccc] bg-white p-6">
+        <Empty text="Relay unreachable — no analytics available" />
+      </section>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-4">
 
-      {/* Stat summary row */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {statCards.map(s => (
-          <div
-            key={s.label}
-            className={`border p-4 flex flex-col gap-1 ${s.alert ? 'border-[#DC2626] bg-[#FEF2F2]' : 'border-[#e2e8f0] bg-white'}`}
-          >
+          <div key={s.label} className="border border-[#e2e8f0] bg-white p-4 flex flex-col gap-1">
             <span className="text-[#94A3B8] text-[10px] uppercase tracking-widest">{s.label}</span>
-            <span className={`font-['JetBrains_Mono',_monospace] text-3xl font-bold ${s.alert ? 'text-[#DC2626]' : 'text-[#0F172A]'}`}>
-              {s.value.toLocaleString()}
+            <span className="font-['JetBrains_Mono',_monospace] text-3xl font-bold text-[#0F172A]">
+              {s.value == null ? '—' : s.value.toLocaleString()}
             </span>
             <span className="text-[#94A3B8] text-[10px] uppercase tracking-widest">{s.unit}</span>
-            {s.alert && (
-              <span className="flex items-center gap-1 text-[#DC2626] text-[10px] font-bold uppercase">
-                Exceeds Limit
-              </span>
-            )}
           </div>
         ))}
       </div>
 
-      {/* Live rolling time-series */}
-      <section className="border border-[#cccccc] bg-white flex flex-col">
-        <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
-          Live Network Traffic — ARP Packets Per Second
-          {isOverLimit && (
-            <span className="ml-auto bg-[#DC2626] text-white px-3 py-1 text-[10px] font-bold uppercase tracking-widest animate-pulse">
-              HIGH-VOLUME ATTACK IN PROGRESS
-            </span>
-          )}
-        </div>
-        <div className="p-4" style={{ height: 260 }}>
+      <Section title="Live Network Traffic — ARP Packets Per Second" note="last 5 minutes" height={280}>
+        {liveRows.length === 0 ? (
+          <Empty text={agents.length ? 'Waiting for agent reports' : 'No agents connected'} />
+        ) : (
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={displayData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+            <ComposedChart data={liveRows} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
               <defs>
                 <linearGradient id="gradPPS" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#1E3A8A" stopOpacity={0.35} />
+                  <stop offset="5%" stopColor="#1E3A8A" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#1E3A8A" stopOpacity={0.02} />
                 </linearGradient>
                 <linearGradient id="gradBlocked" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%"  stopColor="#DC2626" stopOpacity={0.3} />
+                  <stop offset="5%" stopColor="#DC2626" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#DC2626" stopOpacity={0.02} />
                 </linearGradient>
               </defs>
-              <CartesianGrid key="grid-area" strokeDasharray="3 3" stroke="#E2E8F0" />
-              <XAxis
-                key="xaxis-area"
-                dataKey="time"
-                tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }}
-                interval="preserveStartEnd"
-              />
-              <YAxis key="yaxis-area" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
-              <Tooltip key="tooltip-area" content={<CustomTooltip />} />
-              <Legend
-                key="legend-area"
-                wrapperStyle={{ fontSize: 10, fontFamily: 'JetBrains Mono', textTransform: 'uppercase', letterSpacing: '0.1em' }}
-              />
-              <ReferenceLine
-                key="refline-area"
-                y={arpFloodLimit}
-                stroke="#DC2626"
-                strokeDasharray="6 3"
-                label={{ value: `FLOOD LIMIT: ${arpFloodLimit}`, position: 'insideTopRight', fill: '#DC2626', fontSize: 9, fontFamily: 'JetBrains Mono' }}
-              />
-              <Area key="area-pps"     type="monotone" dataKey="pps"     stroke="#1E3A8A" strokeWidth={2} fill="url(#gradPPS)"     name="ARP PPS"    dot={false} />
-              <Area key="area-blocked" type="monotone" dataKey="blocked" stroke="#DC2626" strokeWidth={2} fill="url(#gradBlocked)" name="Blocked PPS" dot={false} />
-            </AreaChart>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+              <XAxis dataKey="time" tick={AXIS_TICK} interval="preserveStartEnd" minTickGap={40} />
+              <YAxis tick={AXIS_TICK} />
+              <Tooltip content={<CustomTooltip />} />
+              <Legend wrapperStyle={LEGEND_STYLE} />
+              <Area type="monotone" dataKey="pps" stroke="#1E3A8A" strokeWidth={2} fill="url(#gradPPS)" name="All agents" dot={false} isAnimationActive={false} />
+              <Area type="monotone" dataKey="blocked" stroke="#DC2626" strokeWidth={2} fill="url(#gradBlocked)" name="Blocked" dot={false} isAnimationActive={false} />
+              {agentKeys.length > 1 && agentKeys.map(a => (
+                <Line key={a.key} type="monotone" dataKey={a.key} stroke={a.colour} strokeWidth={1.5}
+                  strokeDasharray="4 3" dot={false} name={a.name} isAnimationActive={false} />
+              ))}
+            </ComposedChart>
           </ResponsiveContainer>
-        </div>
-      </section>
+        )}
+      </Section>
 
-      {/* Analytics: Daily / Weekly / Monthly */}
+      <Section title="Per-Agent Traffic" note="totals since each agent started">
+        {agents.length === 0 ? (
+          <Empty text="No agents connected" />
+        ) : (
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-[9px] uppercase tracking-widest text-[#94A3B8] border-b border-[#e2e8f0]">
+                <th className="py-2 pr-3 font-normal">Agent</th>
+                <th className="py-2 pr-3 font-normal">MAC</th>
+                <th className="py-2 pr-3 font-normal">Blocking</th>
+                <th className="py-2 pr-3 font-normal text-right">ARP / s</th>
+                <th className="py-2 pr-3 font-normal text-right">Blocked / s</th>
+                <th className="py-2 pr-3 font-normal text-right">ARP Packets</th>
+                <th className="py-2 font-normal text-right">Blocked</th>
+              </tr>
+            </thead>
+            <tbody className="font-['JetBrains_Mono',_monospace] text-[#0F172A]">
+              {agentKeys.map(a => (
+                <tr key={a.mac} className="border-b border-[#f1f5f9] last:border-0">
+                  <td className="py-2 pr-3 font-bold">
+                    <span className="inline-block w-2 h-2 mr-2 align-middle" style={{ background: a.colour }} />
+                    {a.name}
+                  </td>
+                  <td className="py-2 pr-3 text-[#64748B]">{a.mac}</td>
+                  <td className="py-2 pr-3">
+                    <span className={`text-[9px] uppercase tracking-widest px-1.5 py-0.5 ${a.enforcement === 'kernel' ? 'bg-[#1E3A8A] text-white' : 'bg-[#e2e8f0] text-[#475569]'}`}>
+                      {a.enforcement === 'kernel' ? 'Kernel drop' : 'Counted only'}
+                    </span>
+                  </td>
+                  <td className="py-2 pr-3 text-right">{a.pps.toLocaleString()}</td>
+                  <td className={`py-2 pr-3 text-right ${a.blockedPps > 0 ? 'text-[#DC2626]' : ''}`}>{a.blockedPps.toLocaleString()}</td>
+                  <td className="py-2 pr-3 text-right">{a.packets.toLocaleString()}</td>
+                  <td className="py-2 text-right">{a.blocked.toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Section>
+
       <section className="border border-[#cccccc] bg-white flex flex-col">
         <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
-          Analytics — Daily / Weekly / Monthly
+          ARP Packets — {periodLabel}
           <div className="ml-auto flex items-center gap-2">
-            <button onClick={() => setPeriod('daily')} className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${period==='daily' ? 'bg-[#1E3A8A] text-white' : 'bg-white text-[#0F172A] border'} rounded`}>Daily</button>
-            <button onClick={() => setPeriod('weekly')} className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${period==='weekly' ? 'bg-[#1E3A8A] text-white' : 'bg-white text-[#0F172A] border'} rounded`}>Weekly</button>
-            <button onClick={() => setPeriod('monthly')} className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${period==='monthly' ? 'bg-[#1E3A8A] text-white' : 'bg-white text-[#0F172A] border'} rounded`}>Monthly</button>
+            {(['daily', 'weekly', 'monthly'] as const).map(p => (
+              <button
+                key={p}
+                onClick={() => setPeriod(p)}
+                className={`px-3 py-1 text-xs font-bold uppercase tracking-widest ${period === p ? 'bg-[#1E3A8A] text-white' : 'bg-white text-[#0F172A] border'} rounded`}
+              >
+                {p}
+              </button>
+            ))}
           </div>
         </div>
-        <div className="p-4" style={{ height: 220 }}>
-          {period === 'daily' ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={hourlyProfile} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
-                <YAxis tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'JetBrains Mono', textTransform: 'uppercase', letterSpacing: '0.1em' }} />
-                <Bar dataKey="pps" name="Avg PPS (hour)" fill="#1E3A8A" maxBarSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : period === 'weekly' ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={weekdayProfile} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
-                <YAxis tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'JetBrains Mono', textTransform: 'uppercase', letterSpacing: '0.1em' }} />
-                <Bar dataKey="pps" name="Total PPS (weekday)" fill="#1E3A8A" maxBarSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyProfile} margin={{ top: 5, right: 10, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
-                <XAxis dataKey="label" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
-                <YAxis tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
-                <Tooltip content={<CustomTooltip />} />
-                <Legend wrapperStyle={{ fontSize: 10, fontFamily: 'JetBrains Mono', textTransform: 'uppercase', letterSpacing: '0.1em' }} />
-                <Bar dataKey="pps" name="Avg PPS (day)" fill="#1E3A8A" maxBarSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
-          )}
-        </div>
-      </section>
-
-      {/* 24h historical distribution */}
-      <section className="border border-[#cccccc] bg-white flex flex-col">
-        <div className="bg-[#f5f5f5] border-b border-[#cccccc] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A] shrink-0">
-          Threat Incident Distribution — Last 24 Hours (Simulated Historical)
-        </div>
-        <div className="p-4" style={{ height: 200 }}>
+        <div className="p-4" style={{ height: 240 }}>
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={[]} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <CartesianGrid key="grid-bar" strokeDasharray="3 3" stroke="#E2E8F0" />
-              <XAxis key="xaxis-bar" dataKey="hour" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} interval={1} />
-              <YAxis key="yaxis-bar" tick={{ fontSize: 9, fontFamily: 'JetBrains Mono', fill: '#94A3B8' }} />
-              <Tooltip key="tooltip-bar" content={<CustomTooltip />} />
-              <Legend key="legend-bar" wrapperStyle={{ fontSize: 10, fontFamily: 'JetBrains Mono', textTransform: 'uppercase', letterSpacing: '0.1em' }} />
-              <Bar key="bar-incidents" dataKey="incidents" fill="#1E3A8A" name="Total Incidents" maxBarSize={20} />
-              <Bar key="bar-blocked"   dataKey="blocked"   fill="#16A34A" name="Blocked"         maxBarSize={20} />
+            <BarChart data={periodRows} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+              <XAxis dataKey="label" tick={AXIS_TICK} interval="preserveStartEnd" minTickGap={10} />
+              <YAxis tick={AXIS_TICK} />
+              <Tooltip content={<CustomTooltip />} />
+              <Legend wrapperStyle={LEGEND_STYLE} />
+              <Bar dataKey="packets" name="ARP packets" fill="#1E3A8A" maxBarSize={28} isAnimationActive={false} />
+              <Bar dataKey="blocked" name="Blocked" fill="#DC2626" maxBarSize={28} isAnimationActive={false} />
             </BarChart>
           </ResponsiveContainer>
         </div>
       </section>
+
+      <Section title="Threat Incidents — Last 24 Hours" note="from agent attack reports" height={220}>
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={data?.incidents ?? []} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
+            <XAxis dataKey="label" tick={AXIS_TICK} interval="preserveStartEnd" minTickGap={10} />
+            <YAxis tick={AXIS_TICK} allowDecimals={false} />
+            <Tooltip content={<CustomTooltip />} />
+            <Legend wrapperStyle={LEGEND_STYLE} />
+            <Bar dataKey="detections" name="New detections (Tier 2)" fill="#1E3A8A" maxBarSize={20} isAnimationActive={false} />
+            <Bar dataKey="blocks" name="Still-blocking reports (Tier 1 / 3)" fill="#16A34A" maxBarSize={20} isAnimationActive={false} />
+          </BarChart>
+        </ResponsiveContainer>
+      </Section>
 
     </div>
   );
