@@ -155,8 +155,12 @@ if (-not (Test-Path $envExample)) {
 }
 
 $preservedStreamName = ''
+$preservedAdminId = ''
+$preservedAdminPassword = ''
 if (Test-Path $envFile) {
     $preservedStreamName = Get-ConfValue -Lines (Get-Content $envFile) -Key 'MULTICHAIN_STREAM_NAME'
+    $preservedAdminId = Get-ConfValue -Lines (Get-Content $envFile) -Key 'ADMIN_DIGITAL_ID'
+    $preservedAdminPassword = Get-ConfValue -Lines (Get-Content $envFile) -Key 'ADMIN_PASSWORD'
     Copy-Item $envFile "$envFile.bak" -Force
     Write-Host '      Existing .env backed up to .env.bak'
 }
@@ -183,6 +187,13 @@ $updates = [ordered]@{
 # actually survives a relaunch, matching the behaviour this script documents.
 if (-not [string]::IsNullOrWhiteSpace($preservedStreamName)) {
     $updates['MULTICHAIN_STREAM_NAME'] = $preservedStreamName
+}
+# Likewise the administrator account, so a changed ID or password is kept.
+if (-not [string]::IsNullOrWhiteSpace($preservedAdminId)) {
+    $updates['ADMIN_DIGITAL_ID'] = $preservedAdminId
+}
+if (-not [string]::IsNullOrWhiteSpace($preservedAdminPassword)) {
+    $updates['ADMIN_PASSWORD'] = $preservedAdminPassword
 }
 
 $lines = @(Get-Content $envFile)
