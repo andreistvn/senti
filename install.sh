@@ -23,13 +23,21 @@ echo "==========================================="
 
 echo "[1/4] Installing system dependencies..."
 apt-get update
-apt-get install -y python3-venv npm gir1.2-appindicator3-0.1
+apt-get install -y python3-venv npm nftables python3-gi gir1.2-gtk-3.0
+# The tray menu's library. Its package was renamed, and asking apt for a name it
+# does not have fails the whole install line, so try each on its own.
+apt-get install -y gir1.2-ayatanaappindicator3-0.1 \
+    || apt-get install -y gir1.2-appindicator3-0.1 \
+    || echo "  -> No AppIndicator package found; the tray will use its plain GTK icon."
 
 setup_python_venv() {
     local dir=$1
     echo "Setting up Python venv in $dir..."
     cd "$INSTALL_DIR/$dir" || exit
-    python3 -m venv venv
+    # --system-site-packages lets the venv see PyGObject (python3-gi), which the
+    # tray icon's menu needs and which pip cannot install without a compiler.
+    # Packages installed into the venv still take precedence.
+    python3 -m venv --system-site-packages venv
     source venv/bin/activate
     pip install -r requirements.txt
     cd - > /dev/null

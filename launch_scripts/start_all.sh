@@ -18,7 +18,8 @@ echo "════════════════════════�
 echo " SentiNet — Local Dev Environment (relay + agent)"
 echo "════════════════════════════════════════════════════"
 
-bash "$SCRIPTS/start_relay_node.sh" || {
+# Options (e.g. --attacker <MAC>) are the relay's.
+bash "$SCRIPTS/start_relay_node.sh" "$@" || {
     echo "Relay node failed to start — aborting."
     exit 1
 }

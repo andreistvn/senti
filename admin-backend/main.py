@@ -530,8 +530,6 @@ async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str
     # no detection time and are left out — they are not first detections.
     detected_at_ms = data.get("detectedAtMs")
     ttb_event_id = None
-    if tier == "Tier 2":
-        state.count_sop_detection(reporter_mac, action)
     if tier == "Tier 2" and client_event_id and isinstance(detected_at_ms, (int, float)):
         state.record_ttb_detection(
             event_id=client_event_id,
@@ -578,6 +576,11 @@ async def register_agent(sid, data):
     # joins (or reconnects) after a threat was reported starts with an empty
     # Tier-1 filter and never catches up — it would only ever learn about threats
     # detected while it happened to be connected.
+    # Which MAC(s) this run's attacker is, so the agent can score its verdicts
+    # for the live confusion matrix. Always sent, so that an agent reconnecting
+    # to a relay restarted without --attacker stops scoring.
+    await sio.emit("sop_ground_truth", {"attackerMacs": config.SOP_ATTACKER_MACS}, to=sid)
+
     entries = state.get_blacklist()
     if entries:
         await sio.emit("blacklist_sync", {"entries": entries}, to=sid)
@@ -616,6 +619,11 @@ async def telemetry_report(sid, data):
         state.update_agent_telemetry(
             mac, cpu, ram, agent_state, ram_mb=ram_mb, protected=protected,
             scenario=scenario, ram_process_percent=ram_process_percent,
+            attack_detected=data.get("attackDetected"),
+            attack_blocked=data.get("attackBlocked"),
+            enforcement=data.get("enforcement"),
+            confusion=data.get("confusion"),
+            detection_latency=data.get("detectionLatency"),
         )
 
 @sio.event

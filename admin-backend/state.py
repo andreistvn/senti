@@ -30,6 +30,7 @@ from config import (
     TELEMETRY_SAMPLE_INTERVAL,
     TELEMETRY_SCENARIO,
     TELEMETRY_RECORD,
+    SOP_ATTACKER_MACS,
 )
 
 # Admin credentials (kept in memory for POC)
@@ -302,6 +303,11 @@ def update_agent_telemetry(
     protected: Optional[bool] = None,
     scenario: Optional[str] = None,
     ram_process_percent: Optional[float] = None,
+    attack_detected: Optional[float] = None,
+    attack_blocked: Optional[float] = None,
+    enforcement: Optional[str] = None,
+    confusion: Optional[Dict[str, Any]] = None,
+    detection_latency: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Store an agent's latest reading for the dashboard, and append a sample.
@@ -335,6 +341,8 @@ def update_agent_telemetry(
     # build sending percent only is recorded without one rather than guessed at.
     if node_name is not None:
         _take_sop_snapshot(mac, node_name, cpu, ram_mb, protected, scenario)
+        _note_sop_packets(mac, node_name, attack_detected, attack_blocked, enforcement)
+        _note_sop_confusion(mac, node_name, confusion, detection_latency)
         record_reading(
             source='agent',
             node=node_name,
@@ -505,8 +513,16 @@ def _sop_entry_locked(mac: str, name: str) -> Dict[str, Any]:
             'scenario': None,
             'snapshots': {s: {'cpu': [], 'ram': []} for s in SOP_SCENARIOS},
             'last_snapshot': {},
-            'detected': 0,
-            'blocked': 0,
+            # The agent's running attack-packet counts, and what they stood at
+            # when it became the reporting agent — SOP 2 shows the difference.
+            'packets': None,
+            'packets_base': None,
+            'enforcement': None,
+            # Live confusion matrix tallies (tp, fp, tn, fn), with the same kind
+            # of baseline, and the agent's most recent detection latency.
+            'confusion': None,
+            'confusion_base': None,
+            'latency': None,
         }
     entry['name'] = name
     entry['last_seen'] = time.time()
@@ -537,18 +553,66 @@ def register_sop_agent(mac: str, name: str, evaluation: Optional[Dict[str, Any]]
             entry['evaluation'] = evaluation
 
 
-def count_sop_detection(mac: Optional[str], action: Optional[str]) -> None:
+def _note_sop_packets(
+    mac: str,
+    name: str,
+    detected: Optional[float],
+    blocked: Optional[float],
+    enforcement: Optional[str],
+) -> None:
     """
-    Count one Tier-2 detection towards SOP 2's prevention rate (Chapter 3,
-    Equation 4), if it came from the agent the SOP tab is reporting on.
+    Keep the reporting agent's latest attack-packet counts for SOP 2's
+    prevention rate (Chapter 3, Equation 4).
+
+    The agent counts since it started; the baseline taken when it becomes the
+    reporting agent makes the SOP tab count from that moment, like its CPU/RAM
+    snapshots. An agent that restarts counts from zero again, so the baseline
+    is retaken if its figures go backwards.
+    """
+    if not isinstance(detected, (int, float)) or not isinstance(blocked, (int, float)):
+        return
+    with _record_lock:
+        entry = _sop_entry_locked(mac, name)
+        entry['enforcement'] = enforcement
+        if mac != _sop_head_locked():
+            return
+        base = entry['packets_base']
+        if base is None or detected < base[0] or blocked < base[1]:
+            entry['packets_base'] = (detected, blocked)
+        entry['packets'] = (detected, blocked)
+
+
+_CONFUSION_KEYS = ('tp', 'fp', 'tn', 'fn')
+
+
+def _note_sop_confusion(
+    mac: str,
+    name: str,
+    confusion: Optional[Dict[str, Any]],
+    latency: Optional[Dict[str, Any]],
+) -> None:
+    """
+    Keep the reporting agent's live confusion-matrix tallies, relative to what
+    they stood at when it became the reporting agent (as with its packet counts).
     """
     with _record_lock:
-        if not mac or mac != _sop_head_locked():
+        entry = _sop_entry_locked(mac, name)
+        if mac != _sop_head_locked():
             return
-        entry = _sop_agents[mac]
-        entry['detected'] += 1
-        if (action or '').lower() == 'blocked':
-            entry['blocked'] += 1
+        if isinstance(latency, dict):
+            entry['latency'] = latency
+        if not isinstance(confusion, dict):
+            # The agent is not scoring: no attacker declared, or an older build.
+            entry['confusion'] = entry['confusion_base'] = None
+            return
+        try:
+            counts = tuple(int(confusion.get(k, 0)) for k in _CONFUSION_KEYS)
+        except (TypeError, ValueError):
+            return
+        base = entry['confusion_base']
+        if base is None or any(c < b for c, b in zip(counts, base)):
+            entry['confusion_base'] = counts
+        entry['confusion'] = counts
 
 
 def _take_sop_snapshot(
@@ -593,8 +657,12 @@ def _current_sop_agent() -> Optional[Dict[str, Any]]:
             'name': entry['name'],
             'scenario': entry['scenario'],
             'evaluation': entry['evaluation'],
-            'detected': entry['detected'],
-            'blocked': entry['blocked'],
+            'packets': entry['packets'],
+            'packets_base': entry['packets_base'],
+            'enforcement': entry['enforcement'],
+            'confusion': entry['confusion'],
+            'confusion_base': entry['confusion_base'],
+            'latency': entry['latency'],
             'snapshots': {s: {k: list(v) for k, v in entry['snapshots'][s].items()} for s in SOP_SCENARIOS},
         }
 
@@ -870,9 +938,10 @@ def get_sop_summary() -> Dict[str, Any]:
     SOP 1: mean CPU (%) and RAM (MB) per traffic scenario, over the snapshots
     taken of one agent's telemetry since it connected (see _current_sop_agent).
 
-    SOP 2: the confusion matrix and accuracy that agent computed on the held-out
-    test set, plus the prevention rate (Chapter 3, Equation 4) over the Tier-2
-    detections it has reported since it became the reporting agent.
+    SOP 2: the live confusion matrix, when an attacker was declared for the run
+    (the agent's per-packet verdicts against that ground truth); the confusion
+    matrix that agent computed on the held-out test set; and the prevention rate (Chapter 3, Equation 4) over the attack
+    packets it has detected and blocked since it became the reporting agent.
 
     SOP 3: Time-to-Block per (detection, enforcing node) pair, with the latest
     trial's two timestamps and the mean and sample variance across all of them.
@@ -887,10 +956,34 @@ def get_sop_summary() -> Dict[str, Any]:
     sop_agent = _current_sop_agent()
 
     # ── SOP 2 ──
-    # A Tier-2 report is one detected attack; Tier-1/Tier-3 reports are repeat
-    # blocks of a MAC that was already detected, not new detections.
-    total_detected = sop_agent['detected'] if sop_agent else 0
-    blocked_attacks = sop_agent['blocked'] if sop_agent else 0
+    # Counted in packets, by the agent: every packet it attributed to an
+    # attacker, and how many of those the kernel actually dropped. None until
+    # the reporting agent has sent its counts (an older agent build never does).
+    total_detected = blocked_attacks = None
+    if sop_agent and sop_agent['packets'] and sop_agent['packets_base']:
+        total_detected = int(sop_agent['packets'][0] - sop_agent['packets_base'][0])
+        blocked_attacks = int(sop_agent['packets'][1] - sop_agent['packets_base'][1])
+        # A blocked packet is by definition a detected one. Current agents send
+        # the two as a consistent pair; this guards against one that does not.
+        blocked_attacks = min(blocked_attacks, total_detected)
+
+    # The live confusion matrix: each packet the reporting agent saw, by what it
+    # decided about it against what the declared attacker list says it was.
+    live = None
+    if SOP_ATTACKER_MACS and sop_agent and sop_agent['confusion'] and sop_agent['confusion_base']:
+        tp, fp, tn, fn = (c - b for c, b in zip(sop_agent['confusion'], sop_agent['confusion_base']))
+        n = tp + fp + tn + fn
+        live = {
+            'truePositives': tp,
+            'falsePositives': fp,
+            'trueNegatives': tn,
+            'falseNegatives': fn,
+            'n': n,
+            # Chapter 3, Equations 1-3.
+            'accuracy': (tp + tn) / n * 100 if n else None,
+            'detectionRate': tp / (tp + fn) * 100 if (tp + fn) else None,
+            'falsePositiveRate': fp / (fp + tn) * 100 if (fp + tn) else None,
+        }
 
     # ── SOP 1 ──
     grouped: Dict[str, Dict[str, List[float]]] = (
@@ -963,9 +1056,18 @@ def get_sop_summary() -> Dict[str, Any]:
         },
         'detection': {
             'evaluation': sop_agent['evaluation'] if sop_agent else None,
+            # The attacker MAC(s) declared for this run (empty: no live matrix),
+            # the live matrix scored against them, and how long the reporting
+            # agent's most recent detection took.
+            'attackerMacs': SOP_ATTACKER_MACS,
+            'live': live,
+            'latency': sop_agent['latency'] if sop_agent else None,
             'blockedAttacks': blocked_attacks,
             'totalDetectedAttacks': total_detected,
             'preventionRate': (blocked_attacks / total_detected * 100) if total_detected else None,
+            # "kernel": blocked packets are really dropped. "simulated": the
+            # agent's platform cannot drop, so blocked stays at zero.
+            'enforcement': sop_agent['enforcement'] if sop_agent else None,
         },
         'timeToBlock': {
             'latest': latest,

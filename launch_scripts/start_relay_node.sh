@@ -8,7 +8,14 @@
 #   3. FastAPI relay server
 #   4. Admin dashboard (Vite)
 #
-# Usage:  ./launch_scripts/start_relay_node.sh
+# Usage:  ./launch_scripts/start_relay_node.sh [--attacker <MAC>[,<MAC>...]]
+#
+#   --attacker   MAC address of the attack generator for this run. Declares the
+#                ground truth for the SOP tab's live confusion matrix: packets
+#                from this MAC are attacks, all others are benign. Use the MAC
+#                the victims actually see (on the attacker: `ip link show eth0`,
+#                or on macOS `ifconfig en1 | grep ether`). Without it the SOP
+#                tab shows the model's held-out test set figures only.
 #
 # Environment overrides:
 #   CHAIN_NAME=sentinet     MultiChain chain name
@@ -18,6 +25,36 @@
 set -u
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ATTACKER_MACS="${SOP_ATTACKER_MACS:-}"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --attacker)
+            if [ $# -lt 2 ]; then
+                echo "ERROR: --attacker needs a MAC address, e.g. --attacker ce:d6:36:4d:0a:9f"
+                exit 1
+            fi
+            ATTACKER_MACS="$2"; shift 2 ;;
+        --attacker=*)
+            ATTACKER_MACS="${1#--attacker=}"; shift ;;
+        *)
+            echo "ERROR: unknown option '$1'."
+            echo "Usage: ./launch_scripts/start_relay_node.sh [--attacker <MAC>[,<MAC>...]]"
+            exit 1 ;;
+    esac
+done
+
+# Catch a typo here rather than as a confusion matrix that quietly counts the
+# real attacker's packets as false positives.
+if [ -n "$ATTACKER_MACS" ]; then
+    for mac in $(echo "$ATTACKER_MACS" | tr ',' ' '); do
+        if ! echo "$mac" | grep -Eiq '^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$'; then
+            echo "ERROR: '$mac' is not a MAC address (expected the form ce:d6:36:4d:0a:9f)."
+            exit 1
+        fi
+    done
+fi
+export SOP_ATTACKER_MACS="$ATTACKER_MACS"
+
 CHAIN_NAME="${CHAIN_NAME:-sentinet}"
 CHAIN_DIR="$HOME/.multichain/$CHAIN_NAME"
 BIND_HOST="${BIND_HOST:-0.0.0.0}"
@@ -25,6 +62,11 @@ BIND_HOST="${BIND_HOST:-0.0.0.0}"
 echo ""
 echo "SentiNet — Starting RELAY NODE"
 echo "Repository: $ROOT"
+if [ -n "$ATTACKER_MACS" ]; then
+    echo "Attacker (ground truth for the live confusion matrix): $ATTACKER_MACS"
+else
+    echo "No --attacker given: the SOP tab will show test-set figures only."
+fi
 echo ""
 
 # ─── 1. MultiChain node ─────────────────────────────────────────────────────
@@ -243,9 +285,16 @@ fi
 
 # ─── 3 & 4. Relay server + admin dashboard ──────────────────────────────────
 
+# shellcheck source=lib_services.sh
+source "$ROOT/launch_scripts/lib_services.sh"
+
 start_service() {
     local name=$1 dir=$2 cmd=$3
     local log_file="/tmp/sentinet_${name}.log"
+
+    # An instance left over from an earlier run would keep its port, pushing
+    # this one onto a different port than everything else expects.
+    stop_service "$name" "$dir" quiet
 
     echo "      Starting $name (log: $log_file)"
     (
