@@ -306,6 +306,17 @@ start_service() {
 }
 
 echo "[3/4] Starting admin backend (relay)..."
+# Nobody can sign in to the admin dashboard until an administrator account
+# exists, so create one the first time (auth.py stores only a password hash).
+if [ ! -s "$ROOT/admin-backend/admin_credentials.json" ]; then
+    echo ""
+    echo "      No administrator account on this relay yet. Create one now:"
+    ( cd "$ROOT/admin-backend" && python3 auth.py set ) || {
+        echo "ERROR: no administrator account was created. Run: cd admin-backend && python3 auth.py set"
+        exit 1
+    }
+    echo ""
+fi
 start_service "admin_backend" "admin-backend" "python3 main.py"
 
 if [ "${SKIP_DASHBOARD:-0}" != "1" ]; then
