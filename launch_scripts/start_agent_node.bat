@@ -125,7 +125,7 @@ echo [2/3] Starting agent daemon...
 :: quoted command, which breaks on paths containing a space.
 set "DAEMON_LOG=%TEMP%\sentinet_daemon.log"
 del "%DAEMON_LOG%" >nul 2>&1
-start "SentiNet Agent Daemon" /D "%ROOT%\tray-app" powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%TRAY_PY%' sentinet_daemon.py 2>&1 | Tee-Object -FilePath '%DAEMON_LOG%'"
+start "SentiNet Agent Daemon Console" /D "%ROOT%\tray-app" powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%TRAY_PY%' sentinet_daemon.py 2>&1 | Tee-Object -FilePath '%DAEMON_LOG%'"
 
 timeout /t 2 /nobreak >nul
 
@@ -133,14 +133,14 @@ if "%SKIP_TRAY%"=="1" (
     echo       Skipping tray app ^(SKIP_TRAY=1^) - the agent dashboard will have no data source.
 ) else (
     echo       Starting tray app...
-    start "SentiNet Tray App" /D "%ROOT%\tray-app" powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%TRAY_PY%' sentinet_tray.py 2>&1 | Tee-Object -FilePath '%TEMP%\sentinet_tray_app.log'"
+    start "SentiNet Tray App Console" /D "%ROOT%\tray-app" powershell -NoProfile -ExecutionPolicy Bypass -Command "& '%TRAY_PY%' sentinet_tray.py 2>&1 | Tee-Object -FilePath '%TEMP%\sentinet_tray_app.log'"
 )
 
 if "%SKIP_DASHBOARD%"=="1" (
     echo [3/3] Skipping agent dashboard ^(SKIP_DASHBOARD=1^).
 ) else (
     echo [3/3] Starting agent dashboard...
-    start "SentiNet Agent Dashboard" /D "%ROOT%\agent-dashboard" cmd /k "npm run dev"
+    start "SentiNet Agent Dashboard Console" /D "%ROOT%\agent-dashboard" cmd /k "npm run dev"
 )
 
 timeout /t 4 /nobreak >nul
@@ -203,7 +203,7 @@ if not "%SKIP_DASHBOARD%"=="1" (
     call :check_port 5173
     if errorlevel 1 (
         echo       WARNING: the agent dashboard is not serving on 5173 yet.
-        echo       Vite can be slow to start; check the "SentiNet Agent Dashboard" window.
+        echo       Vite can be slow to start; check the "SentiNet Agent Dashboard Console" window.
     ) else (
         echo       Agent dashboard is running.
     )

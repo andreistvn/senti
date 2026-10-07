@@ -21,17 +21,23 @@ echo Stopping SentiNet services...
 echo.
 
 :: --- 1. Service windows launched by our scripts --------------------------
-:: Matched by exact "SentiNet ..." window title only. The old fallback filters
-:: for the pre-reorganisation titles ("Admin Backend*", "Tray App*", etc.) are
-:: gone: WINDOWTITLE is a prefix match against every top-level window on the
-:: desktop, not just ours, so a generic title like that can match an unrelated
-:: window (a browser tab, another app) and /T then kills that window's whole
-:: process tree too.
+:: Matched by exact "SentiNet ... Console" window title only. The old fallback
+:: filters for the pre-reorganisation titles ("Admin Backend*", "Tray App*",
+:: etc.) are gone, and the remaining titles all got a " Console" suffix added
+:: in start_relay_node.bat / start_agent_node.bat. Reason: WINDOWTITLE is a
+:: prefix match against every top-level window on the desktop, not just ours -
+:: and "SentiNet Admin Dashboard" (no suffix) is *exactly* the <title> of the
+:: admin-dashboard web page (admin-dashboard\index.html). Open that page in a
+:: browser and its window/tab title starts with the same text, so the old
+:: filter also matched the browser - and /T then killed the browser's entire
+:: process tree (every window and tab), which is what looked like "other
+:: applications closing". The " Console" suffix means our filter text is
+:: longer than any real page title, so it can no longer match one by prefix.
 echo   Closing service windows...
 
 :: Agent Daemon installs no CTRL_CLOSE handler (see sentinet_daemon.py), so a
 :: graceful close would do nothing but wait - force it immediately.
-taskkill /FI "WINDOWTITLE eq SentiNet Agent Daemon*" /F /T >nul 2>&1
+taskkill /FI "WINDOWTITLE eq SentiNet Agent Daemon Console*" /F /T >nul 2>&1
 
 :: Everything else gets a non-forceful close first: WM_CLOSE becomes
 :: CTRL_CLOSE_EVENT for the console process group, which the OS default
@@ -42,11 +48,11 @@ taskkill /FI "WINDOWTITLE eq SentiNet Agent Daemon*" /F /T >nul 2>&1
 :: elevated windows aren't all hit with TerminateProcess at the same instant,
 :: which has been seen to leave Explorer's shell (taskbar, notification area)
 :: briefly unresponsive.
-for %%W in ("SentiNet Admin Backend" "SentiNet Admin Dashboard" "SentiNet Tray App" "SentiNet Agent Dashboard") do (
+for %%W in ("SentiNet Admin Backend Console" "SentiNet Admin Dashboard Console" "SentiNet Tray App Console" "SentiNet Agent Dashboard Console") do (
     taskkill /FI "WINDOWTITLE eq %%~W*" /T >nul 2>&1
 )
 timeout /t 2 /nobreak >nul
-for %%W in ("SentiNet Admin Backend" "SentiNet Admin Dashboard" "SentiNet Tray App" "SentiNet Agent Dashboard") do (
+for %%W in ("SentiNet Admin Backend Console" "SentiNet Admin Dashboard Console" "SentiNet Tray App Console" "SentiNet Agent Dashboard Console") do (
     taskkill /FI "WINDOWTITLE eq %%~W*" /F /T >nul 2>&1
 )
 
@@ -92,7 +98,7 @@ echo   MultiChain node '%CHAIN_NAME%' was not running.
 
 :chain_kill
 :: Close the node's own window if our launcher opened one.
-taskkill /FI "WINDOWTITLE eq SentiNet MultiChain Node*" /F /T >nul 2>&1
+taskkill /FI "WINDOWTITLE eq SentiNet MultiChain Node Console*" /F /T >nul 2>&1
 
 :done
 echo.
