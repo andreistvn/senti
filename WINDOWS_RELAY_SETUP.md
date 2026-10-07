@@ -91,8 +91,8 @@ to get the real chain, or set `REQUIRE_CHAIN=1` before running this script to ma
 missing node a hard error instead of a warning.
 
 You'll end up with several windows open. **Leave them all running.** The one titled
-*SentiNet MultiChain Node* is the blockchain — if something goes wrong, its output is
-where to look.
+*SentiNet MultiChain Node Console* is the blockchain — if something goes wrong, its output
+is where to look.
 
 Expected ending:
 

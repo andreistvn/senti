@@ -128,7 +128,7 @@ if defined MC_RUNNING (
     echo       multichaind.exe is already running - not starting a second one.
 ) else (
     echo       Starting multichaind in its own window...
-    start "SentiNet MultiChain Node" cmd /k "multichaind %CHAIN_NAME%"
+    start "SentiNet MultiChain Node Console" cmd /k "multichaind %CHAIN_NAME%"
 )
 
 echo       Waiting for RPC to accept connections...
@@ -146,7 +146,7 @@ echo.
 echo ERROR: the MultiChain node is not answering JSON-RPC.
 if defined MC_RUNNING goto :chain_err_orphan
 echo        No multichaind.exe process is running, so it exited during startup.
-echo        Read the "SentiNet MultiChain Node" window for the reason -
+echo        Read the "SentiNet MultiChain Node Console" window for the reason -
 echo        antivirus quarantining multichaind.exe is the usual cause.
 goto :chain_err_tail
 
@@ -215,13 +215,13 @@ if exist "%ROOT%\admin-backend\.venv\Scripts\python.exe" set "PY_RUN=%ROOT%\admi
 rem The relay creates the administrator account itself from ADMIN_DIGITAL_ID /
 rem ADMIN_PASSWORD in admin-backend\.env - nothing to set up here.
 
-start "SentiNet Admin Backend" /D "%ROOT%\admin-backend" cmd /k call "%PY_RUN%" main.py
+start "SentiNet Admin Backend Console" /D "%ROOT%\admin-backend" cmd /k call "%PY_RUN%" main.py
 
 if "%SKIP_DASHBOARD%"=="1" (
     echo [4/4] Skipping admin dashboard ^(SKIP_DASHBOARD=1^).
 ) else (
     echo [4/4] Starting admin dashboard...
-    start "SentiNet Admin Dashboard" /D "%ROOT%\admin-dashboard" cmd /k "npm run dev"
+    start "SentiNet Admin Dashboard Console" /D "%ROOT%\admin-dashboard" cmd /k "npm run dev"
 )
 
 echo.
