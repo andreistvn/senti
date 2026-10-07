@@ -212,6 +212,20 @@ echo [3/4] Starting admin backend (relay)...
 set "PY_RUN=python"
 if exist "%ROOT%\admin-backend\venv\Scripts\python.exe" set "PY_RUN=%ROOT%\admin-backend\venv\Scripts\python.exe"
 if exist "%ROOT%\admin-backend\.venv\Scripts\python.exe" set "PY_RUN=%ROOT%\admin-backend\.venv\Scripts\python.exe"
+rem Nobody can sign in to the admin dashboard until an administrator account
+rem exists, so create one the first time (auth.py stores only a password hash).
+if not exist "%ROOT%\admin-backend\admin_credentials.json" (
+    echo.
+    echo       No administrator account on this relay yet. Create one now:
+    pushd "%ROOT%\admin-backend"
+    "%PY_RUN%" auth.py set
+    popd
+    if not exist "%ROOT%\admin-backend\admin_credentials.json" (
+        echo ERROR: no administrator account was created. Run: cd admin-backend ^&^& python auth.py set
+        exit /b 1
+    )
+    echo.
+)
 
 start "SentiNet Admin Backend" /D "%ROOT%\admin-backend" cmd /k call "%PY_RUN%" main.py
 

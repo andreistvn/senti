@@ -203,11 +203,21 @@ python3 attack_generator.py poison --target <TARGET_IP> --gateway <GATEWAY_IP>
 
 ## Credentials
 
-**Admin Dashboard Login:**
+**Admin Dashboard Login:** the relay checks the digital ID and password against its own
+account file, `admin-backend/admin_credentials.json`, which stores only a salted password
+hash and is not committed to git. Each relay machine therefore has its own account.
 
-- Digital ID: `ADM-7734-ALPHA`
-- Password: `SentiNet@2049`
-- MFA Code: `482910`
+The first time `start_relay_node.sh` / `.bat` runs, it asks you to create the account. To
+create or change one yourself:
+
+```bash
+cd admin-backend
+python3 auth.py set ADM-7734-ALPHA     # prompts for the password twice
+python3 auth.py list
+```
+
+Five wrong passwords for an ID lock it for five minutes. A session ends after an hour
+without activity, or after twelve hours regardless.
 
 ## Troubleshooting
 

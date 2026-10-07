@@ -418,7 +418,8 @@ class BayanihanClient:
                        scenario: str = None, ram_process_percent: float = None,
                        attack_detected: int = None, attack_blocked: int = None,
                        enforcement: str = None, confusion: dict = None,
-                       detection_latency: dict = None):
+                       detection_latency: dict = None,
+                       arp_inspected: int = None, arp_blocked: int = None):
         """
         Report resource consumption to the relay.
 
@@ -460,6 +461,11 @@ class BayanihanClient:
                     payload["confusion"] = confusion
                 if detection_latency:
                     payload["detectionLatency"] = detection_latency
+                # Running counts of ARP packets inspected and blocked by Tier 1,
+                # from which the relay charts traffic per agent (Analytics tab).
+                if arp_inspected is not None:
+                    payload["arpInspected"] = arp_inspected
+                    payload["arpBlocked"] = arp_blocked or 0
                 self.sio.emit("telemetry_report", payload)
             except Exception as e:
                 pass

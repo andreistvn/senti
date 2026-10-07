@@ -7,7 +7,9 @@ transactions into it and periodically reconciles it against what is on-chain, so
 dashboard can render the ledger without blocking on RPC round-trips.
 """
 
+import hashlib
 import platform
+import secrets
 import statistics
 import threading
 import time
@@ -24,6 +26,7 @@ import multichain
 from config import (
     DEFAULT_AGENTS,
     SESSION_TIMEOUT_SECONDS,
+    SESSION_MAX_AGE_SECONDS,
     AGENT_STALE_SECONDS,
     MULTICHAIN_ENABLED,
     MULTICHAIN_STREAM_NAME,
@@ -33,10 +36,6 @@ from config import (
     SOP_ATTACKER_MACS,
 )
 
-# Admin credentials (kept in memory for POC)
-ADMIN_CREDENTIALS = {
-    'ADM-7734-ALPHA': 'SentiNet@2049',
-}
 
 # In-memory stores for items that don't need persistence right now
 policy_config = {
@@ -89,6 +88,9 @@ class DBThreat(Base):
     # queue) and backfill on reconnect (register_agent's recentEvents), the same
     # detection can legitimately arrive here more than once.
     client_event_id = Column(String, nullable=True, index=True)
+    # When the relay received it. `timestamp` above is a clock time with no date,
+    # so it cannot place a report on a day; this can (Analytics tab).
+    created_ts = Column(Float, nullable=True, index=True)
 
 class DBLedgerEntry(Base):
     __tablename__ = "ledger_entries"
@@ -227,7 +229,7 @@ def _migrate_schema():
     additions = {
         'ledger_entries': {'txid': 'VARCHAR', 'created_at': 'FLOAT'},
         'agents': {'ram_mb': 'FLOAT', 'last_seen': 'FLOAT', 'ram_process_percent': 'FLOAT'},
-        'threats': {'detail': 'VARCHAR', 'client_event_id': 'VARCHAR'},
+        'threats': {'detail': 'VARCHAR', 'client_event_id': 'VARCHAR', 'created_ts': 'FLOAT'},
         'ttb_detections': {'agent_delay_ms': 'FLOAT'},
         'ttb_enforcements': {'agent_delay_ms': 'FLOAT'},
     }
@@ -1206,46 +1208,60 @@ def write_to_multichain(threat_dict: dict) -> bool:
 
 # ─── Data Access Methods ───────────────────────────────────────────────────
 
+def _token_key(session_token: str) -> str:
+    """
+    What is stored for a session: a hash of its token, not the token itself, so
+    a copy of the database does not hand out working session cookies.
+    """
+    return hashlib.sha256(session_token.encode("utf-8")).hexdigest()
+
+
 def create_session(digital_id: str) -> str:
-    db = SessionLocal()
-    session_token = f'{digital_id}_{int(time.time())}_{id(object())}'
+    """Start a session and return its token (for the cookie). 256 random bits."""
+    session_token = secrets.token_urlsafe(32)
     now = time.time()
-    db_session = DBSession(token=session_token, digital_id=digital_id, created_at=now, last_accessed=now)
-    db.add(db_session)
-    db.commit()
-    db.close()
+    db = SessionLocal()
+    try:
+        db.add(DBSession(token=_token_key(session_token), digital_id=digital_id,
+                         created_at=now, last_accessed=now))
+        db.commit()
+    finally:
+        db.close()
     return session_token
 
 
 def validate_session(session_token: str) -> Optional[str]:
+    """The digital ID a live session belongs to, or None. Refreshes its idle timer."""
+    if not session_token:
+        return None
     db = SessionLocal()
-    db_session = db.query(DBSession).filter(DBSession.token == session_token).first()
-    
-    if not db_session:
-        db.close()
-        return None
-
-    elapsed = time.time() - db_session.created_at
-    if elapsed > SESSION_TIMEOUT_SECONDS:
-        db.delete(db_session)
+    try:
+        db_session = db.query(DBSession).filter(DBSession.token == _token_key(session_token)).first()
+        if not db_session:
+            return None
+        now = time.time()
+        idle = now - (db_session.last_accessed or db_session.created_at)
+        age = now - db_session.created_at
+        if idle > SESSION_TIMEOUT_SECONDS or age > SESSION_MAX_AGE_SECONDS:
+            db.delete(db_session)
+            db.commit()
+            return None
+        db_session.last_accessed = now
         db.commit()
+        return db_session.digital_id
+    finally:
         db.close()
-        return None
-
-    db_session.last_accessed = time.time()
-    db.commit()
-    digital_id = db_session.digital_id
-    db.close()
-    return digital_id
 
 
 def destroy_session(session_token: str) -> None:
+    if not session_token:
+        return
     db = SessionLocal()
-    db_session = db.query(DBSession).filter(DBSession.token == session_token).first()
-    if db_session:
-        db.delete(db_session)
+    try:
+        db.query(DBSession).filter(DBSession.token == _token_key(session_token)).delete()
         db.commit()
-    db.close()
+    finally:
+        db.close()
 
 
 def get_agents() -> List[Dict[str, Any]]:
@@ -1416,27 +1432,6 @@ def get_telemetry_summary() -> Dict[str, Any]:
     }
 
 
-def get_threat_history() -> List[Dict[str, Any]]:
-    db = SessionLocal()
-    db_threats = db.query(DBThreat).order_by(DBThreat.id.asc()).all()
-    db.close()
-    
-    grouped = {}
-    for t in db_threats:
-        # group by minute for the chart
-        minute = t.timestamp[:5] + ":00"
-        grouped[minute] = grouped.get(minute, 0) + 1
-        
-    history = []
-    for time_str, count in grouped.items():
-        history.append({
-            'time': time_str,
-            'pps': count * 10,
-            'blocked': count
-        })
-    return history
-
-
 def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confidence: str = "99.9%",
                 detail: Optional[str] = None, client_event_id: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -1474,6 +1469,7 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
         action=action,
         detail=detail,
         client_event_id=client_event_id,
+        created_ts=time.time(),
     )
     db.add(db_threat)
     db.commit()

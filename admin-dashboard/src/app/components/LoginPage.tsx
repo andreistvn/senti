@@ -1,8 +1,7 @@
-import React, { useState, useRef } from 'react';
-import { signInAdmin, validateAdminCredentials, validateAdminOtp } from '../lib/adminApi';
+import React, { useState } from 'react';
+import { signInAdmin } from '../lib/adminApi';
 
-type MFAMethod = 'otp' | 'fingerprint' | 'face';
-type AuthStep = 'credentials' | 'mfa' | 'verifying' | 'success' | 'failed';
+type AuthStep = 'credentials' | 'verifying' | 'success';
 
 interface LoginPageProps {
   onLogin: () => void;
@@ -12,91 +11,27 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
   const [digitalId, setDigitalId] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [mfaMethod, setMfaMethod] = useState<MFAMethod>('otp');
-  const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [step, setStep] = useState<AuthStep>('credentials');
   const [credError, setCredError] = useState('');
-  const [mfaError, setMfaError] = useState('');
-  const [scanProgress, setScanProgress] = useState(0);
-  const [scanLabel, setScanLabel] = useState('');
-  
-  const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
 
-  const handleCredSubmit = (e: React.FormEvent) => {
+  // The relay checks the password; this page only sends it and reports back.
+  const handleCredSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (digitalId.trim() === '' || password.trim() === '') {
+    if (digitalId.trim() === '' || password === '') {
       setCredError('ALL FIELDS REQUIRED.');
       return;
     }
-    if (!validateAdminCredentials(digitalId, password)) {
-      setCredError('INVALID DIGITAL ID OR PASSWORD. ACCESS DENIED.');
+    setCredError('');
+    setStep('verifying');
+    const result = await signInAdmin(digitalId.trim(), password);
+    if (!result.ok) {
+      setPassword('');
+      setCredError(result.message.toUpperCase());
+      setStep('credentials');
       return;
     }
-    setCredError('');
-    setStep('mfa');
-  };
-
-  const handleOtpChange = (val: string, idx: number) => {
-    if (!/^\d?$/.test(val)) return;
-    const next = [...otp];
-    next[idx] = val;
-    setOtp(next);
-    if (val && idx < 5) otpRefs.current[idx + 1]?.focus();
-  };
-
-  const handleOtpKeyDown = (e: React.KeyboardEvent, idx: number) => {
-    if (e.key === 'Backspace' && !otp[idx] && idx > 0) {
-      otpRefs.current[idx - 1]?.focus();
-    }
-  };
-
-  const runScan = (label: string) => {
-    setStep('verifying');
-    setScanProgress(0);
-    setScanLabel(label);
-    let p = 0;
-    
-    const t = setInterval(() => {
-      p += 15;
-      setScanProgress(Math.min(p, 100));
-      
-      if (p >= 100) {
-        clearInterval(t);
-        void signInAdmin(digitalId);
-        setTimeout(() => { setStep('success'); setTimeout(onLogin, 1200); }, 400);
-      }
-    }, 180);
-  };
-
-  const handleMfaSubmit = () => {
-    setMfaError('');
-    if (mfaMethod === 'otp') {
-      const entered = otp.join('');
-      if (entered.length < 6) { setMfaError('ENTER COMPLETE 6-DIGIT OTP.'); return; }
-      if (!validateAdminOtp(entered)) {
-        setMfaError('INVALID OTP. VERIFICATION FAILED.');
-        return;
-      }
-      
-      setStep('verifying');
-      setScanProgress(0);
-      setScanLabel('OTP');
-      let p = 0;
-      const t = setInterval(() => {
-        p += 20;
-        setScanProgress(Math.min(p, 100));
-        if (p >= 100) {
-          clearInterval(t);
-          void signInAdmin(digitalId);
-          setStep('success');
-          setTimeout(onLogin, 1200);
-        }
-      }, 120);
-    } else if (mfaMethod === 'fingerprint') {
-      runScan('FINGERPRINT');
-    } else {
-      runScan('FACIAL RECOGNITION');
-    }
+    setStep('success');
+    setTimeout(onLogin, 800);
   };
 
   return (
@@ -122,7 +57,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
             <div className="border border-t-0 border-gray-100 bg-white p-8 shadow-sm rounded-b">
 
-              {/* STEP 1 — Credentials */}
+              {/* Credentials */}
               {(step === 'credentials') && (
                 <form onSubmit={handleCredSubmit} className="space-y-6">
                   <div>
@@ -135,8 +70,9 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                       onChange={e => setDigitalId(e.target.value)}
                       placeholder="ADM-XXXX-XXXXX"
                       className="w-full bg-white border border-gray-200 text-[#0b2540] text-sm px-4 py-3 placeholder-[#9aa4b2] focus:outline-none focus:border-[#1a73e8] tracking-widest"
-                      autoComplete="off"
+                      autoComplete="username"
                       spellCheck={false}
+                      autoFocus
                     />
                   </div>
 
@@ -150,6 +86,7 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                         value={password}
                         onChange={e => setPassword(e.target.value)}
                         placeholder="••••••••••••••"
+                        autoComplete="current-password"
                         className="w-full bg-white border border-gray-200 text-[#0b2540] text-sm px-4 py-3 pr-16 placeholder-[#9aa4b2] focus:outline-none focus:border-[#1a73e8]"
                       />
                       <button
@@ -177,122 +114,16 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
                 </form>
               )}
 
-              {/* STEP 2 — MFA */}
-              {step === 'mfa' && (
-                <div className="space-y-6">
-                  <div className="text-[#22D3EE] text-xs font-['JetBrains_Mono',_monospace] border-l-4 border-[#22D3EE] pl-3 uppercase tracking-widest">
-                    Multi-Factor Authentication Required
-                  </div>
-
-                  {/* MFA method selector */}
-                  <div className="grid grid-cols-3 gap-2">
-                    {([
-                      { id: 'otp', label: 'OTP Code' },
-                      { id: 'fingerprint', label: 'Fingerprint' },
-                      { id: 'face', label: 'Face ID' },
-                    ] as { id: MFAMethod; label: string }[]).map(m => (
-                      <button
-                        key={m.id}
-                        onClick={() => { setMfaMethod(m.id); setMfaError(''); setOtp(['','','','','','']); }}
-                        className={`flex flex-col items-center gap-2 py-4 px-2 border-2 text-xs font-semibold tracking-widest transition ${
-                          mfaMethod === m.id
-                            ? 'border-[#1a73e8] bg-[#eaf4ff] text-[#0b2540]'
-                            : 'border-gray-200 bg-white text-[#475569] hover:border-gray-300 hover:text-[#0b2540]'
-                        }`}
-                      >
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* OTP input */}
-                  {mfaMethod === 'otp' && (
-                    <div className="space-y-4">
-                      <div className="text-[#475569] text-xs uppercase tracking-widest">
-                        Enter 6-digit OTP sent to registered device
-                      </div>
-                      <div className="flex gap-3 justify-center">
-                        {otp.map((d, i) => (
-                          <input
-                            key={i}
-                            ref={el => { otpRefs.current[i] = el; }}
-                            type="text"
-                            inputMode="numeric"
-                            maxLength={1}
-                            value={d}
-                            onChange={e => handleOtpChange(e.target.value, i)}
-                            onKeyDown={e => handleOtpKeyDown(e, i)}
-                            className="w-12 h-14 bg-white border border-gray-200 text-[#0b2540] text-center font-['JetBrains_Mono',_monospace] text-xl focus:outline-none focus:border-[#1a73e8]"
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Fingerprint mock */}
-                  {mfaMethod === 'fingerprint' && (
-                    <div className="flex flex-col items-center gap-4 py-4">
-                      <div className="text-[#475569] text-xs uppercase tracking-widest text-center">
-                        Place registered finger on scanner<br />
-                        <span className="text-[#475569] text-[10px]">MOCK: click verify to simulate</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Face ID mock */}
-                  {mfaMethod === 'face' && (
-                    <div className="flex flex-col items-center gap-4 py-4">
-                      <div className="w-28 h-28 border border-gray-100 bg-white flex items-center justify-center relative overflow-hidden rounded">
-                        {/* scan line animation */}
-                        <div className="absolute left-0 right-0 h-0.5 bg-[#22D3EE] opacity-70"
-                          style={{ animation: 'scanline 2s linear infinite', top: '0%' }} />
-                      </div>
-                      <div className="text-[#475569] text-xs uppercase tracking-widest text-center">
-                        Look directly at the camera<br />
-                        <span className="text-[#475569] text-[10px]">MOCK: click verify to simulate</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {mfaError && (
-                    <div className="flex items-center gap-2 bg-[#7F1D1D] border-2 border-[#DC2626] px-4 py-3 text-[#FCA5A5] text-xs font-bold uppercase tracking-widest font-['JetBrains_Mono',_monospace]">
-                      {mfaError}
-                    </div>
-                  )}
-
-                  <button
-                    onClick={handleMfaSubmit}
-                    className="w-full bg-[#1a73e8] hover:bg-[#1667d0] border border-[#1a73e8] text-white font-semibold tracking-[0.02em] py-3 flex items-center justify-center gap-3 text-sm transition rounded"
-                  >
-                    Verify &amp; Enter
-                  </button>
-
-                  <button
-                    onClick={() => { setStep('credentials'); setCredError(''); setMfaError(''); }}
-                    className="w-full text-[#475569] text-xs uppercase tracking-widest font-['JetBrains_Mono',_monospace] hover:text-[#94A3B8] py-2"
-                  >
-                    Back to Credentials
-                  </button>
-                </div>
-              )}
-
-              {/* STEP 3 — Verifying */}
+              {/* Verifying with the relay */}
               {step === 'verifying' && (
-                <div className="space-y-6 py-4">
-                  <div className="flex items-center gap-3 text-[#22D3EE] font-['JetBrains_Mono',_monospace] text-sm uppercase tracking-widest">
-                    VERIFYING {scanLabel}...
+                <div className="space-y-4 py-6 flex flex-col items-center text-center">
+                  <div className="text-[#0b2540] font-['JetBrains_Mono',_monospace] text-sm uppercase tracking-widest">
+                    Verifying credentials...
                   </div>
-                  <div className="w-full h-6 border-2 border-[#334155] bg-[#0F172A] p-1">
-                    <div
-                      className="h-full bg-[#1E3A8A] transition-all duration-200"
-                      style={{ width: `${scanProgress}%` }}
-                    />
-                  </div>
-                  <div className="text-right text-xs font-['JetBrains_Mono',_monospace] text-[#475569]">{scanProgress}%</div>
                 </div>
               )}
 
-              {/* STEP 4 — Success */}
+              {/* Signed in */}
               {step === 'success' && (
                 <div className="space-y-4 py-6 flex flex-col items-center text-center">
                   <div className="text-[#0b2540] font-bold uppercase tracking-widest text-base">ACCESS GRANTED</div>
@@ -312,12 +143,6 @@ export default function LoginPage({ onLogin }: LoginPageProps) {
 
       </div>
 
-      <style>{`
-        @keyframes scanline {
-          0% { top: 0%; }
-          100% { top: 100%; }
-        }
-      `}</style>
     </div>
   );
 }
