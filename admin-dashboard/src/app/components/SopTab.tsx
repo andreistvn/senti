@@ -209,13 +209,6 @@ export default function SopTab() {
   return (
     <div className="flex flex-col gap-4">
 
-      <section className="border border-[#cccccc] bg-white">
-        <div className="bg-[#f5f5f5] p-3 px-4 font-bold text-sm tracking-widest flex items-center gap-2 text-[#0F172A]">
-          Statement of the Problem
-          <span className="ml-auto font-['JetBrains_Mono',_monospace] text-[#1E3A8A] text-xs">SENTINET AGENT</span>
-        </div>
-      </section>
-
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {buildCards(summary).map(sop => (
           <section key={sop.key} className="border border-[#cccccc] bg-white flex flex-col">
