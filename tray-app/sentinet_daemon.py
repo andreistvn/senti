@@ -46,6 +46,7 @@ from config import (
     FLOOD_PPS_THRESHOLD,
     POISON_PPS_THRESHOLD,
     SCENARIO_WINDOW_SECONDS,
+    SCENARIO_HOLD_SECONDS,
     KERNEL_COUNTER_REFRESH_SECONDS,
 )
 from ipc_protocol import (
@@ -605,6 +606,9 @@ class CaptureEngine(threading.Thread):
                 with self.state._lock:
                     self.state.sig_contributions += 1
 
+_SCENARIO_RANK = {"normal": 0, "poisoning": 1, "flooding": 2}
+
+
 class TelemetryEngine(threading.Thread):
     """
     Tracks this daemon's own CPU and memory consumption.
@@ -634,6 +638,10 @@ class TelemetryEngine(threading.Thread):
         self._cpu_sample = self._cpu_now()
         # (time, blocked counter) samples spanning SCENARIO_WINDOW_SECONDS.
         self._blocked_samples: deque = deque()
+        # The scenario currently reported, and when the measured rate last
+        # supported it (see _classify_scenario).
+        self._scenario = "normal"
+        self._scenario_confirmed_at = 0.0
         # SOP 2's packet counts as last computed from the kernel's drop counter
         # (see _attack_counts), and what the agent's own counts stood at then,
         # so the counter is only re-read while an attack is in progress.
@@ -650,8 +658,10 @@ class TelemetryEngine(threading.Thread):
         Which of the paper's three traffic scenarios this agent is in right now.
 
         Judged from the rate at which Tier 1 is dropping attack packets, averaged
-        over a short window so a single stray drop or a momentary gap in a flood
-        doesn't flip the label back and forth.
+        over a short window. The label rises as soon as the rate crosses a
+        cut-off, but only falls once the rate has stayed below it for
+        SCENARIO_HOLD_SECONDS — an attack's packets arrive in bursts, and without
+        the hold the label flickers between scenarios while it is still running.
         """
         now = time.time()
         with self.state._lock:
@@ -662,12 +672,27 @@ class TelemetryEngine(threading.Thread):
 
         t0, b0 = self._blocked_samples[0]
         elapsed = now - t0
-        if elapsed <= 0 or blocked <= b0:
-            return "normal"
-        pps = (blocked - b0) / elapsed
-        if pps < POISON_PPS_THRESHOLD:
-            return "normal"
-        return "flooding" if pps >= FLOOD_PPS_THRESHOLD else "poisoning"
+        pps = (blocked - b0) / elapsed if elapsed > 0 and blocked > b0 else 0.0
+        if pps >= FLOOD_PPS_THRESHOLD:
+            measured = "flooding"
+        elif pps >= POISON_PPS_THRESHOLD:
+            measured = "poisoning"
+        else:
+            measured = "normal"
+
+        current = self._scenario
+        if _SCENARIO_RANK[measured] >= _SCENARIO_RANK[current]:
+            # Same level or higher: take it, and note the level was just confirmed.
+            self._scenario_confirmed_at = now
+            if measured != current:
+                print(f"[Telemetry] Scenario {current} -> {measured} ({pps:.1f} attack packets/s)", flush=True)
+                self._scenario = measured
+        elif (now - self._scenario_confirmed_at) >= SCENARIO_HOLD_SECONDS:
+            print(f"[Telemetry] Scenario {current} -> {measured} "
+                  f"({pps:.1f} attack packets/s, below the cut-off for {SCENARIO_HOLD_SECONDS:.0f}s)", flush=True)
+            self._scenario = measured
+            self._scenario_confirmed_at = now
+        return self._scenario
 
     def _attack_counts(self) -> tuple:
         """
