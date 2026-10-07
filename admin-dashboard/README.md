@@ -8,13 +8,10 @@ It includes:
 
 - **Login** (`/`) — public page, gated entry to the protected dashboard.
 - **Dashboard** (`/dashboard`) — protected, with tabs for **Dashboard, Analytics,
-  Policy, and Settings**.
+  and SOP**.
 - **Threat Analytics** — live rolling AreaChart (ARP packets-per-second) and a
   historical 24-hour BarChart (Recharts).
 - **Real-time push notifications** (sonner) that fire when PPS exceeds the ARP Flood Limit.
-- **Policy configurator** — slider-based ML thresholds / network parameters with a
-  "Broadcast to All Agents" action.
-- **Node Topology & Health Map** — per-agent CPU/RAM bars with warnings when CPU > 70%.
 - **Blockchain Metrics** — Block Height / Chain Status plus Export CSV for incident reports.
 
 ## Running locally
