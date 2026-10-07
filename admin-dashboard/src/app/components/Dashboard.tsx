@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useRef, useCallback, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { toast, Toaster } from 'sonner';
 import ThreatAnalyticsTab from './ThreatAnalyticsTab';
-import PolicyTab, { PolicyConfig, AgentHealth } from './PolicyTab';
 import SopTab from './SopTab';
 import { getAdminDashboardSeed, getAdminDashboardSeedFallback } from '../lib/adminApi';
-import type { AdminBlacklistEntry } from '../lib/adminApi';
+import type { AdminBlacklistEntry, AdminPolicyConfig } from '../lib/adminApi';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,7 +27,7 @@ interface Agent {
 interface LogEntry    { id: number; timestamp: string; message: string; }
 interface LedgerEntry { blockId: string; timestamp: string; macHash: string; score: string; }
 
-type Tab = 'dashboard' | 'analytics' | 'policy' | 'sop';
+type Tab = 'dashboard' | 'analytics' | 'sop';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -83,7 +82,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   });
 
 
-  const [policyConfig, setPolicyConfig] = useState<PolicyConfig>(adminSeed.policyConfig);
+  const [policyConfig, setPolicyConfig] = useState<AdminPolicyConfig>(adminSeed.policyConfig);
 
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const ledgerContainerRef = useRef<HTMLDivElement>(null);
@@ -198,38 +197,9 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
     setLedger([]);
   };
 
-  const handlePolicyBroadcast = useCallback((cfg: PolicyConfig, changes: string[]) => {
-    setPolicyConfig(cfg);
-    const ts = now();
-    changes.forEach(ch => {
-      setLogs(l => [...l, { id: logIdCounter.current++, timestamp: ts, message: `POLICY: Broadcast — ${ch}` }].slice(-100));
-    });
-    toast.success(
-      `Policy broadcast to ${agents.length} agents — ${changes.length} change${changes.length > 1 ? 's' : ''} applied`,
-      {
-        style: { background: '#0F172A', border: '2px solid #16A34A', color: '#fff', borderRadius: 0, fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' },
-        duration: 5000,
-      }
-    );
-  }, [agents.length]);
-
-  const agentHealthData: AgentHealth[] = agents.map(a => ({
-    id:               a.id,
-    name:             a.name,
-    ip:               a.ip,
-    mac:              a.mac,
-    cpu:              a.cpu,
-    ramMb:            a.ramMb ?? null,
-    ramProcessPercent: a.ramProcessPercent ?? 0,
-    connectedSince:   a.connectedSince,
-    packetsProcessed: a.packetsProcessed,
-    state:            a.state,
-  }));
-
   const TABS: { key: Tab; label: string }[] = [
     { key: 'dashboard', label: 'Dashboard' },
     { key: 'analytics', label: 'Analytics' },
-    { key: 'policy',    label: 'Policy' },
     { key: 'sop',       label: 'SOP' },
   ];
 
@@ -275,11 +245,6 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       {/* ── Analytics Tab ── */}
       {activeTab === 'analytics' && (
         <ThreatAnalyticsTab />
-      )}
-
-      {/* ── Policy Tab ── */}
-      {activeTab === 'policy' && (
-        <PolicyTab config={policyConfig} agents={agentHealthData} onBroadcast={handlePolicyBroadcast} />
       )}
 
       {/* ── SOP Tab ── */}
