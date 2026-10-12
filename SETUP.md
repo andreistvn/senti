@@ -25,6 +25,7 @@ Before you can run the system, you must install the dependencies for each compon
 In case of incompatible commands due to OS differences, just look up the equivalent commands for your operating system.
 
 ### 1. Admin Backend
+
 ```bash
 cd admin-backend
 python3 -m venv venv
@@ -34,6 +35,7 @@ cd ..
 ```
 
 ### 2. Admin Dashboard
+
 ```bash
 cd admin-dashboard
 npm install
@@ -41,6 +43,7 @@ cd ..
 ```
 
 ### 3. Agent Dashboard
+
 ```bash
 cd agent-dashboard
 npm install
@@ -48,10 +51,49 @@ cd ..
 ```
 
 ### 4. Tray Daemon
+
 ```bash
 cd tray-app
 python3 -m venv venv
 source venv/bin/activate
+pip install -r requirements.txt
+cd ..
+```
+
+**Windows**
+
+### 1. Admin Backend
+
+```bash
+cd admin-backend
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+cd ..
+```
+
+### 2. Admin Dashboard
+
+```bash
+cd admin-dashboard
+npm install
+cd ..
+```
+
+### 3. Agent Dashboard
+
+```bash
+cd agent-dashboard
+npm install
+cd ..
+```
+
+### 4. Tray Daemon
+
+```bash
+cd tray-app
+python -m venv venv
+.\venv\Scripts\activate
 pip install -r requirements.txt
 cd ..
 ```
@@ -66,7 +108,8 @@ machine is the all-in-one launcher:
 ```bash
 ./launch_scripts/start_all.sh
 ```
-*(Note: You will be prompted for your `sudo` password to allow the daemon to sniff network packets. It may take a minute for the Node servers to compile).*
+
+_(Note: You will be prompted for your `sudo` password to allow the daemon to sniff network packets. It may take a minute for the Node servers to compile)._
 
 > This runs the relay node and one agent on the same machine — convenient for
 > development, but it does not exercise the decentralized architecture. To run the
@@ -112,7 +155,7 @@ npm run dev
 ```
 
 Open `http://localhost:5175` in your browser.
-*(Note: Configuration like the Backend URL is pre-configured in `.env.local`, which is deliberately tracked in version control for this POC).*
+_(Note: Configuration like the Backend URL is pre-configured in `.env.local`, which is deliberately tracked in version control for this POC)._
 
 ### Terminal 3: Agent Dashboard
 
@@ -143,7 +186,7 @@ cd traffic-gen
 python3 benign_traffic.py
 
 # Simulate a high-volume ARP flood attack (~1,000 PPS):
-python3 attack_generator.py flood --target <TARGET_IP>
+python3 attack_generator.py flood --target <TARGET_IP> --gateway <GATEWAY_IP>
 
 # Simulate a targeted Man-in-the-Middle (MITM) ARP poisoning attack:
 python3 attack_generator.py poison --target <TARGET_IP> --gateway <GATEWAY_IP>
@@ -151,26 +194,31 @@ python3 attack_generator.py poison --target <TARGET_IP> --gateway <GATEWAY_IP>
 
 ## Service URLs
 
-| Service | URL | Purpose |
-|---------|-----|---------|
-| Admin Dashboard | http://localhost:5175 | Web UI for system administration |
-| Agent Dashboard | http://localhost:5173 | Web UI for agent protection status |
-| Admin Backend | http://127.0.0.1:8771 | API for admin dashboard (localhost only) |
-| Tray Daemon | http://127.0.0.1:8770 | API for agent dashboard (localhost only) |
+| Service         | URL                   | Purpose                                  |
+| --------------- | --------------------- | ---------------------------------------- |
+| Admin Dashboard | http://localhost:5175 | Web UI for system administration         |
+| Agent Dashboard | http://localhost:5173 | Web UI for agent protection status       |
+| Admin Backend   | http://127.0.0.1:8771 | API for admin dashboard (localhost only) |
+| Tray Daemon     | http://127.0.0.1:8770 | API for agent dashboard (localhost only) |
 
 ## Credentials
 
-**Admin Dashboard Login:**
+**Admin Dashboard Login:** there is nothing to set up. When the relay starts, it creates
+the administrator account named in `admin-backend/.env`:
 
-- Digital ID: `ADM-7734-ALPHA`
-- Password: `SentiNet@2049`
-- MFA Code: `482910`
+```
+ADMIN_DIGITAL_ID=ADM-7734-ALPHA
+ADMIN_PASSWORD=SentiNet@2049
+```
 
-**Agent Dashboard:**
+Those are the defaults from `.env.example`. To use a different account, change the two
+lines in `admin-backend/.env` and restart the relay; the start scripts keep your values
+when they regenerate that file.
 
-- Digital ID: *(Any value)*
-- Password: *(Any value)*
-- *(The agent dashboard currently accepts any mock credentials during this POC phase).*
+The relay checks every sign-in itself and keeps only a salted password hash, in
+`admin-backend/admin_credentials.json` (not committed to git). Five wrong passwords for an
+ID lock it for five minutes. A session ends after an hour without activity, or after
+twelve hours regardless.
 
 ## Troubleshooting
 
@@ -182,12 +230,14 @@ The stop script also shuts the MultiChain node down (`multichain-cli sentinet st
 
 **Mac / Linux:**
 Run the stop script to safely and forcefully kill all Python and Node processes related to the system:
+
 ```bash
 ./launch_scripts/stop_all.sh
 ```
 
 **Windows:**
 Run the stop batch script from an Administrator Command Prompt:
+
 ```cmd
 launch_scripts\stop_all.bat
 ```

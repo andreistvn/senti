@@ -17,7 +17,47 @@ This process is **unprivileged**. It does not touch raw sockets or perform any
 packet capture. All security-critical state comes from the root-privileged
 daemon (``sentinet_daemon.py``) via IPC.
 """
+import os
+import sys
 import webbrowser
+
+
+def _select_linux_backend():
+    """
+    Choose pystray's Linux backend before it is imported.
+
+    Left to itself pystray tries AppIndicator, then GTK, then raw Xorg. The
+    first two need PyGObject (`gi`), a system package that an ordinary venv
+    cannot see — so inside one, pystray silently lands on the Xorg backend,
+    which has no menu at all and draws the icon without transparency. That is
+    the tray icon that looks wrong and does nothing when clicked.
+
+    Probing here also sidesteps a pystray bug: with `gi` present but no
+    AppIndicator library, its AppIndicator backend raises ValueError instead of
+    ImportError, which crashes the import rather than falling through to GTK.
+
+    Returns the backend chosen, or None to leave the choice to pystray.
+    """
+    if not sys.platform.startswith("linux") or os.environ.get("PYSTRAY_BACKEND"):
+        return os.environ.get("PYSTRAY_BACKEND")
+    try:
+        import gi
+        gi.require_version("Gtk", "3.0")
+    except (ImportError, ValueError):
+        os.environ["PYSTRAY_BACKEND"] = "xorg"
+        return "xorg"
+    for namespace in ("AyatanaAppIndicator3", "AppIndicator3"):
+        try:
+            gi.require_version(namespace, "0.1")
+            os.environ["PYSTRAY_BACKEND"] = "appindicator"
+            return "appindicator"
+        except ValueError:
+            continue
+    os.environ["PYSTRAY_BACKEND"] = "gtk"
+    return "gtk"
+
+
+TRAY_BACKEND = _select_linux_backend()
 
 import pystray
 from PIL import Image, ImageDraw
@@ -78,6 +118,11 @@ def build(state: AgentState):
             "Protection Active",
             on_toggle,
             checked=lambda _i: state.is_protected(),
+            # A backend with no menu (Xorg) only ever fires the default item,
+            # on a click of the icon — so make that the toggle, or the icon
+            # would do nothing at all. Where there is a menu, clicking the icon
+            # should open it rather than flip protection by surprise.
+            default=not pystray.Icon.HAS_MENU,
         ),
         pystray.MenuItem("Open Dashboard", on_open_dashboard),
         pystray.Menu.SEPARATOR,
@@ -104,6 +149,34 @@ def build(state: AgentState):
     return icon
 
 
+def _install_windows_close_handler(icon):
+    """Make ``stop_all.bat`` / a closed console window remove the notify icon.
+
+    A force-killed process (``taskkill /F``, or any other TerminateProcess)
+    never runs Python cleanup code, so pystray never sends the Shell_NotifyIcon
+    NIM_DELETE that removes the icon - it lingers as a "ghost" until Explorer
+    happens to redraw the tray. Handling CTRL_CLOSE/LOGOFF/SHUTDOWN lets a
+    *graceful* close call icon.stop() first, so the icon disappears immediately.
+    Windows-only; keeps a reference to the ctypes callback alive to prevent GC.
+    """
+    import ctypes
+
+    CTRL_CLOSE_EVENT = 2
+    CTRL_LOGOFF_EVENT = 5
+    CTRL_SHUTDOWN_EVENT = 6
+    HANDLER_ROUTINE = ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_uint)
+
+    def handler(ctrl_type):
+        if ctrl_type in (CTRL_CLOSE_EVENT, CTRL_LOGOFF_EVENT, CTRL_SHUTDOWN_EVENT):
+            icon.stop()
+            return 1
+        return 0
+
+    callback = HANDLER_ROUTINE(handler)
+    ctypes.windll.kernel32.SetConsoleCtrlHandler(callback, True)
+    return callback
+
+
 def main():
     state = AgentState()
 
@@ -117,9 +190,17 @@ def main():
     print(f"[SentiNet Tray] Daemon IPC: {daemon_label}")
     print(f"[SentiNet Tray] API listening on http://{API_HOST}:{API_PORT}")
     print(f"[SentiNet Tray] Dashboard target: {DASHBOARD_URL}")
-    print("[SentiNet Tray] Tray icon is running. Right-click it for the menu.")
+    if pystray.Icon.HAS_MENU:
+        print("[SentiNet Tray] Tray icon is running. Right-click it for the menu.")
+    else:
+        print("[SentiNet Tray] Tray icon is running WITHOUT a menu: PyGObject is not visible to")
+        print("                this Python, so only the basic Xorg tray is available. Clicking")
+        print("                the icon toggles protection. For the full menu:")
+        print("                  sudo apt-get install -y python3-gi gir1.2-gtk-3.0 gir1.2-ayatanaappindicator3-0.1")
+        print("                  sed -i 's/^include-system-site-packages.*/include-system-site-packages = true/' venv/pyvenv.cfg")
 
     icon = build(state)
+    _keepalive = _install_windows_close_handler(icon) if sys.platform == "win32" else None
     try:
         icon.run()  # blocks on the main thread until Quit
     finally:

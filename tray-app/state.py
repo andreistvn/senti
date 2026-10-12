@@ -49,13 +49,23 @@ class AgentState:
 
         # Telemetry
         self.cpu: float = 4.0
-        self.memory: int = 84
+        self.memory: int = 84          # system-wide percent, gauge only
+        self.memory_mb: float = 0.0    # daemon RSS in MB (Chapter 3's figure)
 
         # Bayanihan
         self.sig_contributions: int = 0
-        self.users_protected: int = 40
+        self.bayanihan_pending: int = 0
+        # Mirrored from the daemon: whether it is really connected to the relay,
+        # where that relay is, and the name of the network this machine is on.
+        self.relay_status: str = "offline"
+        self.relay_url: str = ""
+        self.network: str = ""
 
         # Detection log
+        # This node's own identity, pushed by the daemon.
+        self.identity: Dict[str, str] = {"hostname": "", "ip": "", "mac": ""}
+        self.blacklist: list = []
+
         self.events: list = []
         self.last_threat: Optional[Dict[str, str]] = None
 
@@ -108,6 +118,9 @@ class AgentState:
 
         with self._lock:
             self.protected = status.get("protected", self.protected)
+            self.relay_status = status.get("relay", self.relay_status)
+            self.relay_url = status.get("relayUrl", self.relay_url)
+            self.network = status.get("network", self.network)
             since_str = status.get("since")
             if since_str:
                 try:
@@ -123,8 +136,11 @@ class AgentState:
             self.blocked = stats.get("blocked", self.blocked)
             self.cpu = stats.get("cpu", self.cpu)
             self.memory = stats.get("memory", self.memory)
+            self.memory_mb = stats.get("memoryMb", self.memory_mb)
+            self.identity = snapshot.get("identity", self.identity)
+            self.blacklist = snapshot.get("blacklist", self.blacklist)
             self.sig_contributions = bayanihan.get("contributions", self.sig_contributions)
-            self.users_protected = bayanihan.get("usersProtected", self.users_protected)
+            self.bayanihan_pending = bayanihan.get("pending", self.bayanihan_pending)
             self.last_threat = stats.get("lastThreat", self.last_threat)
             self.events = list(events)
             self.services = list(services)
@@ -172,7 +188,9 @@ class AgentState:
                 since = datetime.fromtimestamp(self.protected_since).isoformat()
             return {
                 "protected": self.protected,
-                "relay": "online" if self.protected else "offline",
+                "relay": self.relay_status if self.protected else "offline",
+                "relayUrl": self.relay_url,
+                "network": self.network,
                 "version": AGENT_VERSION,
                 "since": since,
             }
@@ -184,14 +202,17 @@ class AgentState:
                 "dropped": self.dropped,
                 "passed": self.passed,
                 "blocked": self.blocked,
-                "cpu": round(self.cpu, 1),
+                "cpu": round(self.cpu, 5),
                 "memory": self.memory,
+                "memoryMb": round(self.memory_mb, 1),
                 "bayanihan": {
                     "contributions": self.sig_contributions,
-                    "usersProtected": self.users_protected,
+                    "pending": self.bayanihan_pending,
                 },
                 "lastThreat": self.last_threat,
                 "protected": self.protected,
+                "identity": self.identity,
+                "blacklist": self.blacklist,
             }
 
     def events_list(self) -> list:

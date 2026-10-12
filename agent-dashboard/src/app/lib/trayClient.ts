@@ -11,6 +11,8 @@ export const BASE_URL = 'http://127.0.0.1:8770';
 export interface TrayStatus {
   protected: boolean;
   relay: 'online' | 'offline';
+  relayUrl?: string;  // where this agent's relay is
+  network?: string;   // Wi-Fi / connection name this machine is on
   version: string;
   since: string | null;
 }
@@ -27,8 +29,11 @@ export interface TrayStats {
   passed: number;
   blocked: number;
   cpu: number;
-  memory: number;
-  bayanihan: { contributions: number; usersProtected: number };
+  memory: number;      // percent of total machine RAM
+  memoryMb?: number;   // this agent's own RSS in MB (Chapter 3's figure)
+  identity?: { hostname: string; ip: string; mac: string };
+  blacklist?: { mac: string; addedAt: string; origin: string; attackType: string; confidence: string }[];
+  bayanihan: { contributions: number; usersProtected: number; pending?: number };
   lastThreat: TrayLastThreat | null;
   protected: boolean;
 }

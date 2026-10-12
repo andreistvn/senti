@@ -91,20 +91,58 @@ if ($MultiChainEnabled -eq 'true') {
 
 # --- Detect this machine's LAN address ------------------------------------
 
+# Ask the OS which source address it would actually use to reach the internet,
+# i.e. the interface holding the default route. Taking the first entry from
+# Get-NetIPAddress instead returns roughly interface-index order, which on a
+# machine with VirtualBox/VMware/Hyper-V/WSL routinely picks a virtual adapter
+# (192.168.56.1 and friends) that no other device can reach — the agents then
+# get an address that can never work.
 $lan = '127.0.0.1'
 try {
-    $candidate = Get-NetIPAddress -AddressFamily IPv4 |
-                 Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.PrefixOrigin -ne 'WellKnown' } |
-                 Select-Object -First 1
-    if ($candidate -and $candidate.IPAddress) { $lan = $candidate.IPAddress }
-} catch {
-    # Get-NetIPAddress is unavailable on very old Windows; fall back to DNS.
+    $route = Find-NetRoute -RemoteIPAddress '8.8.8.8' -ErrorAction Stop |
+             Where-Object { $_.IPAddress -and $_.IPAddress -ne '127.0.0.1' } |
+             Select-Object -First 1
+    if ($route -and $route.IPAddress) { $lan = $route.IPAddress }
+} catch { }
+
+if ($lan -eq '127.0.0.1') {
     try {
-        $ips = [System.Net.Dns]::GetHostAddresses([System.Net.Dns]::GetHostName()) |
-               Where-Object { $_.AddressFamily -eq 'InterNetwork' -and $_.IPAddressToString -ne '127.0.0.1' }
-        if ($ips) { $lan = $ips[0].IPAddressToString }
+        $idx = (Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction Stop |
+                Sort-Object RouteMetric | Select-Object -First 1).InterfaceIndex
+        if ($idx) {
+            $ip = (Get-NetIPAddress -AddressFamily IPv4 -InterfaceIndex $idx -ErrorAction Stop |
+                   Where-Object { $_.IPAddress -ne '127.0.0.1' } |
+                   Select-Object -First 1).IPAddress
+            if ($ip) { $lan = $ip }
+        }
     } catch { }
 }
+
+if ($lan -eq '127.0.0.1') {
+    try {
+        $candidate = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+                     Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.PrefixOrigin -ne 'WellKnown' } |
+                     Select-Object -First 1
+        if ($candidate -and $candidate.IPAddress) { $lan = $candidate.IPAddress }
+    } catch {
+        try {
+            $ips = [System.Net.Dns]::GetHostAddresses([System.Net.Dns]::GetHostName()) |
+                   Where-Object { $_.AddressFamily -eq 'InterNetwork' -and $_.IPAddressToString -ne '127.0.0.1' }
+            if ($ips) { $lan = $ips[0].IPAddressToString }
+        } catch { }
+    }
+}
+
+# Surface the alternatives so a wrong pick is visible on screen.
+try {
+    $others = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop |
+              Where-Object { $_.IPAddress -ne '127.0.0.1' -and $_.IPAddress -ne $lan } |
+              ForEach-Object { "$($_.IPAddress) ($($_.InterfaceAlias))" }
+    if ($others) {
+        Write-Host "      Other addresses on this machine: $($others -join ', ')"
+        Write-Host '      Agents must use an address on THEIR subnet.'
+    }
+} catch { }
 
 # --- Rewrite admin-backend\.env -------------------------------------------
 
@@ -116,7 +154,13 @@ if (-not (Test-Path $envExample)) {
     exit 1
 }
 
+$preservedStreamName = ''
+$preservedAdminId = ''
+$preservedAdminPassword = ''
 if (Test-Path $envFile) {
+    $preservedStreamName = Get-ConfValue -Lines (Get-Content $envFile) -Key 'MULTICHAIN_STREAM_NAME'
+    $preservedAdminId = Get-ConfValue -Lines (Get-Content $envFile) -Key 'ADMIN_DIGITAL_ID'
+    $preservedAdminPassword = Get-ConfValue -Lines (Get-Content $envFile) -Key 'ADMIN_PASSWORD'
     Copy-Item $envFile "$envFile.bak" -Force
     Write-Host '      Existing .env backed up to .env.bak'
 }
@@ -135,6 +179,21 @@ $updates = [ordered]@{
     'MULTICHAIN_RPC_USER'     = $rpcUser
     'MULTICHAIN_RPC_PASSWORD' = $rpcPassword
     'ADMIN_CORS_ORIGINS'      = $corsOrigins
+}
+
+# Copy-Item above resets the whole file to .env.example's defaults, which would
+# silently drop a custom MULTICHAIN_STREAM_NAME (e.g. a demo stream) even though
+# this script never otherwise touches it. Carry the previous value forward so it
+# actually survives a relaunch, matching the behaviour this script documents.
+if (-not [string]::IsNullOrWhiteSpace($preservedStreamName)) {
+    $updates['MULTICHAIN_STREAM_NAME'] = $preservedStreamName
+}
+# Likewise the administrator account, so a changed ID or password is kept.
+if (-not [string]::IsNullOrWhiteSpace($preservedAdminId)) {
+    $updates['ADMIN_DIGITAL_ID'] = $preservedAdminId
+}
+if (-not [string]::IsNullOrWhiteSpace($preservedAdminPassword)) {
+    $updates['ADMIN_PASSWORD'] = $preservedAdminPassword
 }
 
 $lines = @(Get-Content $envFile)

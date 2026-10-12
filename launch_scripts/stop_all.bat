@@ -12,26 +12,49 @@
 setlocal
 
 cd /d "%~dp0.."
+set "ROOT=%CD%"
 if "%CHAIN_NAME%"=="" set "CHAIN_NAME=sentinet"
+set "CHAIN_DIR=%APPDATA%\MultiChain\%CHAIN_NAME%"
 
 echo.
 echo Stopping SentiNet services...
 echo.
 
 :: --- 1. Service windows launched by our scripts --------------------------
+:: Matched by exact "SentiNet ... Console" window title only. The old fallback
+:: filters for the pre-reorganisation titles ("Admin Backend*", "Tray App*",
+:: etc.) are gone, and the remaining titles all got a " Console" suffix added
+:: in start_relay_node.bat / start_agent_node.bat. Reason: WINDOWTITLE is a
+:: prefix match against every top-level window on the desktop, not just ours -
+:: and "SentiNet Admin Dashboard" (no suffix) is *exactly* the <title> of the
+:: admin-dashboard web page (admin-dashboard\index.html). Open that page in a
+:: browser and its window/tab title starts with the same text, so the old
+:: filter also matched the browser - and /T then killed the browser's entire
+:: process tree (every window and tab), which is what looked like "other
+:: applications closing". The " Console" suffix means our filter text is
+:: longer than any real page title, so it can no longer match one by prefix.
 echo   Closing service windows...
-taskkill /FI "WINDOWTITLE eq SentiNet Admin Backend*"   /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq SentiNet Admin Dashboard*" /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq SentiNet Agent Daemon*"    /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq SentiNet Tray App*"        /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq SentiNet Agent Dashboard*" /F /T >nul 2>&1
 
-:: Window titles from the pre-reorganisation scripts, for good measure.
-taskkill /FI "WINDOWTITLE eq Admin Backend*"   /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Admin Dashboard*" /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Agent Daemon*"    /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Tray App*"        /F /T >nul 2>&1
-taskkill /FI "WINDOWTITLE eq Agent Dashboard*" /F /T >nul 2>&1
+:: Agent Daemon installs no CTRL_CLOSE handler (see sentinet_daemon.py), so a
+:: graceful close would do nothing but wait - force it immediately.
+taskkill /FI "WINDOWTITLE eq SentiNet Agent Daemon Console*" /F /T >nul 2>&1
+
+:: Everything else gets a non-forceful close first: WM_CLOSE becomes
+:: CTRL_CLOSE_EVENT for the console process group, which the OS default
+:: handler (or, for the tray app, its own handler) uses to exit cleanly - for
+:: the tray app that is what lets it call Shell_NotifyIcon NIM_DELETE so the
+:: notification-area icon doesn't linger as a "ghost". Signalling all of them
+:: before waiting, instead of force-killing each in turn, also means the
+:: elevated windows aren't all hit with TerminateProcess at the same instant,
+:: which has been seen to leave Explorer's shell (taskbar, notification area)
+:: briefly unresponsive.
+for %%W in ("SentiNet Admin Backend Console" "SentiNet Admin Dashboard Console" "SentiNet Tray App Console" "SentiNet Agent Dashboard Console") do (
+    taskkill /FI "WINDOWTITLE eq %%~W*" /T >nul 2>&1
+)
+timeout /t 2 /nobreak >nul
+for %%W in ("SentiNet Admin Backend Console" "SentiNet Admin Dashboard Console" "SentiNet Tray App Console" "SentiNet Agent Dashboard Console") do (
+    taskkill /FI "WINDOWTITLE eq %%~W*" /F /T >nul 2>&1
+)
 
 :: --- 2. Stragglers started outside the scripts ---------------------------
 echo   Sweeping up stray python processes...
@@ -44,24 +67,38 @@ if "%KEEP_CHAIN%"=="1" (
     goto :done
 )
 
-where multichain-cli >nul 2>&1
-if errorlevel 1 (
-    echo   multichain-cli not on PATH - skipping chain shutdown.
-    goto :done
+:: Shutdown goes over JSON-RPC, not through multichain-cli. The CLI is unsigned
+:: and can be blocked by Smart App Control or an antivirus, in which case this
+:: script silently failed to stop anything and left an orphan multichaind holding
+:: the chain - which then broke the next start_relay_node.bat run. See
+:: windows\Test-ChainRpc.ps1.
+if not exist "%CHAIN_DIR%\multichain.conf" (
+    echo   No chain at %CHAIN_DIR% - skipping chain shutdown.
+    goto :chain_kill
 )
 
-multichain-cli %CHAIN_NAME% getinfo >nul 2>&1
-if errorlevel 1 (
-    echo   MultiChain node '%CHAIN_NAME%' is not running.
-) else (
-    echo   Stopping MultiChain node '%CHAIN_NAME%'...
-    multichain-cli %CHAIN_NAME% stop >nul 2>&1
-    :: multichaind flushes its wallet on shutdown; give it a moment.
-    timeout /t 2 /nobreak >nul
-)
+echo   Asking MultiChain node '%CHAIN_NAME%' to stop...
+powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT%\launch_scripts\windows\Test-ChainRpc.ps1" -ChainDir "%CHAIN_DIR%" -Action Stop
+set "RC=%ERRORLEVEL%"
 
-:: If the node ignored the graceful stop, close its window too.
-taskkill /FI "WINDOWTITLE eq SentiNet MultiChain Node*" /F /T >nul 2>&1
+if "%RC%"=="0" goto :chain_kill
+if "%RC%"=="1" goto :chain_absent
+if "%RC%"=="2" goto :chain_absent
+
+:: RC 3 = node up but credentials rejected, RC 4 = asked to stop and refused.
+:: Either way it is still holding the chain, and leaving it there is what breaks
+:: the next start_relay_node.bat run. multichaind flushes on a clean stop, so an
+:: unclean kill here is the lesser evil.
+echo   Node would not shut down over RPC - terminating multichaind.exe.
+taskkill /IM multichaind.exe /F /T >nul 2>&1
+goto :chain_kill
+
+:chain_absent
+echo   MultiChain node '%CHAIN_NAME%' was not running.
+
+:chain_kill
+:: Close the node's own window if our launcher opened one.
+taskkill /FI "WINDOWTITLE eq SentiNet MultiChain Node Console*" /F /T >nul 2>&1
 
 :done
 echo.

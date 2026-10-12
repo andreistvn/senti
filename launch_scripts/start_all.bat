@@ -15,7 +15,12 @@ setlocal
 net session >nul 2>&1
 if errorlevel 1 (
     echo Requesting administrative privileges ^(needed by the agent daemon^)...
-    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    rem Pass any options (e.g. --attacker MAC) on to the elevated copy.
+    if "%~1"=="" (
+        powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
+    ) else (
+        powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -ArgumentList '%*' -Verb RunAs"
+    )
     exit /b
 )
 
@@ -30,7 +35,9 @@ echo ====================================================
 echo.
 
 echo Starting relay node...
-call "%~dp0start_relay_node.bat"
+rem Options (e.g. --attacker MAC) are the relay's.
+call "%~dp0start_relay_node.bat" %*
+if errorlevel 1 exit /b 1
 
 :: Give the relay's Socket.io server a moment before the agent dials in.
 timeout /t 3 /nobreak >nul

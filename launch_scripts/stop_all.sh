@@ -19,39 +19,56 @@ echo ""
 echo "Stopping SentiNet services..."
 echo ""
 
-stop_service() {
-    local name=$1
-    local pid_file="/tmp/sentinet_${name}.pid"
-
-    if [ -f "$pid_file" ]; then
-        local pid
-        pid=$(cat "$pid_file")
-        echo "  Killing $name (PID $pid)..."
-        # npm/vite spawn children, so take the whole process group down.
-        pkill -P "$pid" 2>/dev/null
-        kill "$pid" 2>/dev/null
-        rm -f "$pid_file"
-    else
-        echo "  $name is not running."
-    fi
-}
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=lib_services.sh
+source "$ROOT/launch_scripts/lib_services.sh"
 
 # ─── 1. Node processes (dashboards) and the FastAPI relay ───────────────────
-stop_service "admin_backend"
-stop_service "admin_dashboard"
-stop_service "tray_app"
-stop_service "agent_dashboard"
-
-# Sweep up anything started outside these scripts (e.g. run by hand).
-pkill -f "admin-backend/main.py" 2>/dev/null
-pkill -f "sentinet_tray.py"      2>/dev/null
+# Each is found by its command and directory as well as its recorded PID, so
+# this also catches instances started by hand or left over from earlier runs.
+stop_service "admin_backend"   "admin-backend"
+stop_service "admin_dashboard" "admin-dashboard"
+stop_service "tray_app"        "tray-app"
+stop_service "agent_dashboard" "agent-dashboard"
 
 # ─── 2. Privileged daemon ───────────────────────────────────────────────────
 if pgrep -f "sentinet_daemon.py" >/dev/null 2>&1; then
     echo "  Killing agent daemon (requires sudo)..."
     sudo pkill -f "sentinet_daemon.py"
+    sleep 1
+    # The daemon runs as root, so a declined or failed sudo prompt leaves it
+    # alive — and it reconnects to the next relay with its old state.
+    if pgrep -f "sentinet_daemon.py" >/dev/null 2>&1; then
+        echo "  Agent daemon did not exit — forcing it..."
+        sudo pkill -9 -f "sentinet_daemon.py"
+        sleep 1
+    fi
+    if pgrep -f "sentinet_daemon.py" >/dev/null 2>&1; then
+        echo "  WARNING: agent daemon is STILL running. Run: sudo pkill -9 -f sentinet_daemon.py"
+    fi
 else
     echo "  Agent daemon is not running."
+fi
+
+# Undelivered attack reports last only as long as the agent does. The daemon
+# empties this itself on a clean exit; removing the file covers one that had to
+# be force-killed. It is root's file in our own directory, so plain rm can
+# usually remove it; fall back to sudo if not.
+PENDING_DB="$ROOT/tray-app/pending_reports.db"
+if [ -e "$PENDING_DB" ] || [ -e "$PENDING_DB-journal" ]; then
+    rm -f "$PENDING_DB" "$PENDING_DB-journal" 2>/dev/null \
+        || sudo rm -f "$PENDING_DB" "$PENDING_DB-journal"
+    echo "  Cleared undelivered attack reports."
+fi
+
+# A daemon that had to be force-killed cannot clean up after itself, which on
+# Linux would leave its kernel rules dropping blacklisted MACs indefinitely.
+NFT_BIN="$(command -v nft 2>/dev/null || true)"
+# Not on an ordinary user's PATH on Debian-family systems.
+[ -z "$NFT_BIN" ] && [ -x /usr/sbin/nft ] && NFT_BIN=/usr/sbin/nft
+if [ -n "$NFT_BIN" ] && sudo "$NFT_BIN" list table netdev sentinet >/dev/null 2>&1; then
+    echo "  Removing leftover SentiNet kernel block rules..."
+    sudo "$NFT_BIN" delete table netdev sentinet
 fi
 
 # ─── 3. MultiChain node ─────────────────────────────────────────────────────

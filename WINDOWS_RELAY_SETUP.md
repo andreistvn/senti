@@ -82,9 +82,17 @@ Every time you want the relay running. It:
 4. Starts the relay API on port 8771, reachable from other machines.
 5. Starts the Admin Dashboard on port 5175.
 
+If `multichaind` isn't on `PATH` yet — Step 2 hasn't been run, or the antivirus
+exclusion is still pending — the script no longer aborts. It prints a warning, writes
+`MULTICHAIN_ENABLED=false` to `admin-backend\.env`, and starts everything else anyway:
+detection, blocking and the blacklist broadcast all still work, only the ledger is
+unavailable and **Chain Status** reads `DEGRADED`. Run `launch_scripts\setup_windows_relay.bat`
+to get the real chain, or set `REQUIRE_CHAIN=1` before running this script to make a
+missing node a hard error instead of a warning.
+
 You'll end up with several windows open. **Leave them all running.** The one titled
-*SentiNet MultiChain Node* is the blockchain — if something goes wrong, its output is
-where to look.
+*SentiNet MultiChain Node Console* is the blockchain — if something goes wrong, its output
+is where to look.
 
 Expected ending:
 
@@ -164,14 +172,16 @@ delete `%APPDATA%\MultiChain\sentinet`; the next start rebuilds it.
 
 | Symptom | Fix |
 |---|---|
-| `'multichaind' not found` | Run `launch_scripts\setup_windows_relay.bat` first. |
-| Setup says `multichaind.exe would not run` | Antivirus quarantined it. Add an exclusion for `%LOCALAPPDATA%\SentiNet\multichain`, then re-run setup. |
+| `'multichaind' not found` | The relay still starts, just without the ledger (`Chain Status` reads `DEGRADED`). Run `launch_scripts\setup_windows_relay.bat` to install MultiChain and get the real chain. Set `REQUIRE_CHAIN=1` before starting the relay to make this a hard error instead. |
+| Setup says `multichaind.exe would not run` | Antivirus quarantined it, or Windows 11 Smart App Control blocked it for being unsigned. For antivirus, add an exclusion for `%LOCALAPPDATA%\SentiNet\multichain` and re-run setup. To tell the two apart, check Event Viewer → Applications and Services Logs → Microsoft → Windows → CodeIntegrity → Operational for a block naming the file. **Do not turn Smart App Control off** — it cannot be switched back on without reinstalling Windows; run the relay on a machine that doesn't have it, or in a Linux VM, instead. |
 | `'python' is not recognized` | Python isn't on PATH. Reinstall from [python.org](https://www.python.org/downloads/) with **"Add python.exe to PATH"** ticked. |
 | MultiChain node window opens then closes instantly | Read it before it vanishes: run `multichaind sentinet` directly in a Command Prompt to see the error. Usually antivirus or a port conflict. |
 | Agents can't connect | Confirm you gave them the **LAN IP**, not `localhost`. Check both machines are on the same network, and that the firewall rules exist: `netsh advfirewall firewall show rule name="SentiNet Relay API 8771"` |
 | Dashboard loads but everything is empty | `admin-dashboard\.env.local` has the wrong address. Re-run `start_relay_node.bat` — it rewrites it with the current LAN IP. |
-| `Chain Status: DEGRADED` | `"%LOCALAPPDATA%\SentiNet\multichain\multichain-cli.exe" sentinet getinfo` to see if the node is alive; `curl http://localhost:8771/ledger/status` for the exact error. Threat reports queue in memory and publish automatically once the chain returns — nothing is lost. |
-| `'multichain-cli' is not recognized` | It's not on `PATH` — that's expected in a fresh Command Prompt. Use the full path shown above, or run the check from the window `start_relay_node.bat` is running in. |
+| `Chain Status: DEGRADED` | `curl http://localhost:8771/ledger/status` for the exact error, and `powershell -File launch_scripts\windows\Test-ChainRpc.ps1 -ChainDir "%APPDATA%\MultiChain\sentinet"` to check the node itself. Threat reports queue in memory and publish automatically once the chain returns — nothing is lost. |
+| `permissions.db ... The handle is invalid` / `multichaind for this blockchain is already running` | A second node was started on top of a live one. Run `launch_scripts\stop_all.bat`, then start again. If `stop_all` can't clear it: `taskkill /IM multichaind.exe /F`. The chain is not damaged. |
+| `ERROR: the MultiChain node is not answering JSON-RPC` | The launcher now prints the real reason underneath, and keeps it in `%TEMP%\sentinet_chainrpc.log`. Read that first — it distinguishes "node never started" from "node is up but we can't reach it". |
+| `multichain-cli.exe` blocked by Smart App Control | Nothing to fix: SentiNet never calls the CLI. The relay talks to the node over JSON-RPC (`admin-backend\multichain.py`) and the launchers use `Test-ChainRpc.ps1`. Only first-time chain creation needs `multichain-util.exe` — if that is blocked too, copy a working `%APPDATA%\MultiChain\sentinet` folder from another machine. |
 | LAN IP changed (new Wi-Fi, reboot) | Re-run `start_relay_node.bat` and send teammates the new IP. A static IP or DHCP reservation avoids this. |
 
 ---
