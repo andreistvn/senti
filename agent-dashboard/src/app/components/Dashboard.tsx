@@ -72,10 +72,9 @@ export default function Dashboard() {
           </span>
           <UserGuideDialog open={guideOpen} onOpenChange={handleGuideOpenChange} />
           {!live && (
-            <span className="flex items-center gap-2 text-[#f59e0b]" title="Tray daemon not detected — showing simulated data">
+            <span className="flex items-center gap-2 text-[#f59e0b]" title="Tray daemon not detected — no live data to show">
               <span className="w-2 h-2 rounded-full bg-[#f59e0b] animate-pulse inline-block" />
-              MOCK MODE
-              <InfoPopover panel="mockMode" tone="dark" />
+              SERVICE NOT RUNNING
             </span>
           )}
         </div>
