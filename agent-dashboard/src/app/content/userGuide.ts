@@ -49,7 +49,6 @@ export const PANEL_GUIDES: Record<PanelGuideId, PanelGuide> = {
     title: 'Last Detected Threat',
     what: 'The most recent threat SentiNet blocked.',
     how: "Shows the time, the attack type and the attacker's MAC address. NONE DETECTED means nothing has been blocked yet.",
-    action: 'Nothing — the attacker is already blocked. The Detection Log below shows the full history.',
   },
   cpu: {
     title: 'CPU Load',
@@ -64,19 +63,24 @@ export const PANEL_GUIDES: Record<PanelGuideId, PanelGuide> = {
   throughput: {
     title: 'Traffic Throughput',
     what: 'Running totals of ARP packets since protection was turned on.',
-    how: 'INSPECTED = ARP packets checked. DROPPED = packets from blacklisted attackers that were blocked. PASSED = packets that were allowed through to the ML check.',
-    action: 'Nothing. SentiNet only inspects ARP packets, so on a quiet network these numbers can stay at 0 — that is normal.',
+    how:
+      'INSPECTED = ARP packets checked.\n' +
+      'DROPPED = packets from blacklisted attackers that were blocked.\n' +
+      'PASSED = packets that were allowed through to the ML check.\n' +
+      'SentiNet only inspects ARP packets, so on a quiet network these numbers can stay at 0 — that is normal.',
   },
   detectionLog: {
     title: 'Detection Log',
     what: 'A list of recent detections.',
-    how: 'Tier 2 = caught by the Machine Learning model on this device. Tier 1 = an attacker already on the blacklist was blocked again. Tier 3 = blocked because another SentiNet user reported it through the relay.',
+    how:
+      'Tier 1 = an attacker already on the blacklist was blocked again.\n' +
+      'Tier 2 = caught by the Machine Learning model on this device.\n' +
+      'Tier 3 = blocked because another SentiNet user reported it through the relay.',
   },
   blacklist: {
     title: 'Tier-1 Blacklist',
     what: 'The MAC addresses that are currently blocked.',
-    how: 'Origin "Local" = detected by this device. "From Relay" = learned from another user (proof the collaborative defense works).',
-    action: 'Nothing. Your own device and your gateway/router are never blacklisted.',
+    how: 'Origin "Local" = detected by this device. "From Relay" = learned from another user (proof the collaborative defense works). Your own device and your gateway/router are never blacklisted.',
   },
 };
 

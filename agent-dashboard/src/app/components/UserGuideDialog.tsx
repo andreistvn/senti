@@ -151,7 +151,7 @@ function GuideField({ label, text }: { label: string; text: string }) {
   return (
     <div>
       <dt className="text-[#888] text-[9px] tracking-widest uppercase mb-0.5">{label}</dt>
-      <dd className="text-[#111] text-xs leading-relaxed">{text}</dd>
+      <dd className="text-[#111] text-xs leading-relaxed whitespace-pre-line">{text}</dd>
     </div>
   );
 }
