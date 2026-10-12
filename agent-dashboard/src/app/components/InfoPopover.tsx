@@ -48,7 +48,7 @@ function PopoverSection({ label, text }: { label: string; text: string }) {
   return (
     <div>
       <p className="text-[#888] text-[9px] tracking-widest uppercase mb-1">{label}</p>
-      <p className="text-[#111] text-xs leading-relaxed">{text}</p>
+      <p className="text-[#111] text-xs leading-relaxed whitespace-pre-line">{text}</p>
     </div>
   );
 }
