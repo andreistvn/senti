@@ -11,7 +11,6 @@ export interface PanelGuide {
 
 export type PanelGuideId =
   | 'identity'
-  | 'mockMode'
   | 'protection'
   | 'relay'
   | 'lastThreat'
@@ -26,12 +25,6 @@ export const PANEL_GUIDES: Record<PanelGuideId, PanelGuide> = {
     title: 'Header IP / MAC',
     what: "This computer's own network address (IP) and hardware address (MAC).",
     how: 'The first value is the IP address, the second is the MAC address. A dash means it is not known yet.',
-  },
-  mockMode: {
-    title: 'MOCK MODE badge',
-    what: 'The SentiNet background service (tray app / daemon) is not detected, so the dashboard cannot show live data.',
-    how: 'While this badge is blinking, the numbers on screen are simulated, not real.',
-    action: 'Start SentiNet with the launch script. The badge disappears once the service is running.',
   },
   protection: {
     title: 'Protection Status',
@@ -87,7 +80,6 @@ export const PANEL_GUIDES: Record<PanelGuideId, PanelGuide> = {
 // Order the panels appear in the guide (matches the dashboard, top to bottom).
 export const PANEL_GUIDE_ORDER: PanelGuideId[] = [
   'identity',
-  'mockMode',
   'protection',
   'relay',
   'lastThreat',
@@ -136,7 +128,7 @@ export const STATUS_COLORS = {
     { color: '#00aa55', label: 'Green', meaning: 'Protected / online / passed.' },
     { color: '#c0392b', label: 'Red', meaning: 'Dropped / blocked / turn off.' },
     { color: '#3a5070', label: 'Gray-blue', meaning: 'Unprotected / offline.' },
-    { color: '#f59e0b', label: 'Amber, blinking "MOCK MODE"', meaning: 'The background service is not running.' },
+    { color: '#f59e0b', label: 'Amber, blinking "SERVICE NOT RUNNING"', meaning: 'The dashboard cannot reach the SentiNet background service, so there is no live data.' },
   ],
 };
 
@@ -146,7 +138,7 @@ export const TROUBLESHOOTING = {
   fixLabel: 'What to do',
   rows: [
     {
-      symptom: 'MOCK MODE is showing',
+      symptom: 'SERVICE NOT RUNNING is showing',
       fix: 'The tray app/daemon is not running. Run the start script (as Administrator on Windows / with sudo on Mac/Linux).',
     },
     {
@@ -159,7 +151,7 @@ export const TROUBLESHOOTING = {
     },
     {
       symptom: 'Toggle button missing',
-      fix: 'The service is not running (MOCK MODE). Start it with the launch script.',
+      fix: 'The service is not running (the SERVICE NOT RUNNING badge is showing). Start it with the launch script.',
     },
     {
       symptom: 'My router/gateway got blocked?',
