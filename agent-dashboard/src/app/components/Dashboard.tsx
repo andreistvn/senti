@@ -239,6 +239,16 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
+                  {eLogs.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-10 text-center">
+                        <p className="text-[#0d1b3e] text-xs font-bold tracking-wider">No threats detected yet</p>
+                        <p className="text-[#555] text-xs mt-1">
+                          When SentiNet blocks an attack on this agent, it will be listed here.
+                        </p>
+                      </td>
+                    </tr>
+                  )}
                   {eLogs.map(log => (
                     <tr key={log.id} className="border-b border-[#f0f0f0] bg-[#fff5f5] hover:bg-[#ffe8e8] transition-colors">
                       <td className="px-4 py-3 text-[#555] text-[10px] font-mono">{log.timestamp}</td>
