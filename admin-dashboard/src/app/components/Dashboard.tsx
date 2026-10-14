@@ -211,7 +211,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
       {/* Header */}
       <header className="bg-[#0d1b3e] border-b-2 border-[#c0392b] px-6 py-3 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-3">
-          <span className="text-white tracking-widest text-sm font-bold uppercase">Admin Sentinet</span>
+          <span className="text-white tracking-widest text-sm font-bold uppercase">Sentinet Admin</span>
         </div>
         <div className="flex items-center gap-6 text-xs text-[#8899bb]">
           <span className="flex items-center gap-2">
