@@ -1,8 +1,39 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { X } from 'lucide-react';
 import ScrollingLine from './ScrollingLine';
+import InfoPopover from './InfoPopover';
+import UserGuideDialog from './UserGuideDialog';
 import { useDashboardState } from '../dashboard/useDashboardState';
+import { FIRST_VISIT_HINT, type PanelGuideId } from '../content/userGuide';
+
+const GUIDE_HINT_KEY = 'sentinet.userGuideHintDismissed';
+
+function readHintDismissed(): boolean {
+  try {
+    return window.localStorage.getItem(GUIDE_HINT_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
 
 export default function Dashboard() {
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [showGuideHint, setShowGuideHint] = useState(() => !readHintDismissed());
+
+  const dismissGuideHint = () => {
+    setShowGuideHint(false);
+    try {
+      window.localStorage.setItem(GUIDE_HINT_KEY, '1');
+    } catch {
+      // Storage unavailable (private window, blocked site data) — hide for this visit only.
+    }
+  };
+
+  const handleGuideOpenChange = (open: boolean) => {
+    setGuideOpen(open);
+    if (open && showGuideHint) dismissGuideHint();
+  };
+
   const {
     cpuData,
     cpuIntervalMs,
@@ -35,24 +66,46 @@ export default function Dashboard() {
           <span className="text-white tracking-widest text-sm font-bold uppercase">SentiNet Agent Dashboard</span>
         </div>
         <div className="flex items-center gap-6 text-xs">
-          <span className="text-[#8899bb] tracking-wider">
+          <span className="flex items-center gap-2 text-[#8899bb] tracking-wider">
             {eIdentity.ip || '—'} / {eIdentity.mac || '—'}
+            <InfoPopover panel="identity" tone="dark" />
           </span>
+          <UserGuideDialog open={guideOpen} onOpenChange={handleGuideOpenChange} />
           {!live && (
-            <span className="flex items-center gap-2 text-[#f59e0b]" title="Tray daemon not detected — showing simulated data">
+            <span className="flex items-center gap-2 text-[#f59e0b]" title="Tray daemon not detected — no live data to show">
               <span className="w-2 h-2 rounded-full bg-[#f59e0b] animate-pulse inline-block" />
-              MOCK MODE
+              SERVICE NOT RUNNING
             </span>
           )}
         </div>
       </header>
+
+      {showGuideHint && (
+        <div role="status" className="bg-white border-b border-[#cccccc] px-6 py-2 flex items-center justify-between gap-4 shrink-0">
+          <button
+            type="button"
+            onClick={() => handleGuideOpenChange(true)}
+            className="flex items-center gap-2 text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold hover:text-[#c0392b] transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]"
+          >
+            {FIRST_VISIT_HINT}
+          </button>
+          <button
+            type="button"
+            onClick={dismissGuideHint}
+            aria-label="Dismiss user guide hint"
+            className="text-[#888] hover:text-[#0d1b3e] transition-colors p-0.5 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#c0392b]"
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 p-5 space-y-4 overflow-auto max-w-[1800px] mx-auto w-full">
 
         {/* Row 1: Status Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader title="Protection Status" />
+            <PanelHeader title="Protection Status" panel="protection" />
             <div className="p-5">
               <div
                 className="inline-flex items-center gap-2 px-5 py-2.5 mb-3"
@@ -81,7 +134,7 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader title="Relay Connection" />
+            <PanelHeader title="Relay Connection" panel="relay" />
             <div className="p-5">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-2.5 h-2.5 shrink-0" style={{ background: eRelayOnline ? '#00aa55' : '#3a5070' }} />
@@ -94,7 +147,7 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader title="Last Detected Threat" />
+            <PanelHeader title="Last Detected Threat" panel="lastThreat" />
             <div className="p-5">
               <p className="text-[#111] text-sm tracking-widest font-bold mb-3">
                 {eLastThreat ? eLastThreat.timestamp : 'NONE DETECTED'}
@@ -109,7 +162,7 @@ export default function Dashboard() {
         {/* Row 2: Telemetry */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader title="CPU Load (Tier-1 Efficiency)" />
+            <PanelHeader title="CPU Load (Tier-1 Efficiency)" panel="cpu" />
             <div className="p-5">
               <ScrollingLine values={cpuData.map(d => d.usage)} intervalMs={cpuIntervalMs} />
               <div className="flex items-baseline gap-2 mt-2">
@@ -120,7 +173,7 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader title="System RAM Usage" />
+            <PanelHeader title="System RAM Usage" panel="ram" />
             <div className="p-5 flex flex-col items-center">
               <div className="relative w-28 h-28">
                 <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
@@ -142,7 +195,7 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-white border border-[#cccccc]">
-            <PanelHeader title="Traffic Throughput (PPS)" />
+            <PanelHeader title="Traffic Throughput (PPS)" panel="throughput" />
             <div className="p-5 space-y-3">
               {[
                 { label: 'INSPECTED', value: eInspected.toLocaleString(), pct: 100, color: '#1a4fd6', textColor: '#111', hideBar: true },
@@ -168,9 +221,12 @@ export default function Dashboard() {
         {/* Row 3: Detection Log + Blacklist */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch" style={{ minHeight: 320 }}>
           <div className="lg:col-span-2 bg-white border border-[#cccccc] flex flex-col">
-            <div className="px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5]">
-              <p className="text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold">Detection Log</p>
-              <p className="text-[#888] text-[9px] tracking-wider mt-0.5">Real-time threat detection activity</p>
+            <div className="flex items-start justify-between gap-2 px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5]">
+              <div>
+                <p className="text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold">Detection Log</p>
+                <p className="text-[#888] text-[9px] tracking-wider mt-0.5">Real-time threat detection activity</p>
+              </div>
+              <InfoPopover panel="detectionLog" />
             </div>
             <div className="flex-1 overflow-x-auto">
               <div ref={detectionLogsContainerRef} className="h-full max-h-[36rem] overflow-y-auto">
@@ -183,6 +239,16 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
+                  {eLogs.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-10 text-center">
+                        <p className="text-[#0d1b3e] text-xs font-bold tracking-wider">No threats detected yet</p>
+                        <p className="text-[#555] text-xs mt-1">
+                          When SentiNet blocks an attack on this agent, it will be listed here.
+                        </p>
+                      </td>
+                    </tr>
+                  )}
                   {eLogs.map(log => (
                     <tr key={log.id} className="border-b border-[#f0f0f0] bg-[#fff5f5] hover:bg-[#ffe8e8] transition-colors">
                       <td className="px-4 py-3 text-[#555] text-[10px] font-mono">{log.timestamp}</td>
@@ -213,12 +279,15 @@ export default function Dashboard() {
                 <div className="flex items-center gap-2">
                   <span className="text-white text-[10px] tracking-widest uppercase font-bold">Tier-1 Blacklist</span>
                 </div>
-                <span className="text-[#8899bb] text-[10px] tracking-widest">
-                  {eBlacklist.length} BLOCKED &middot; {eSigContrib} SHARED
-                  {eReportsPending > 0 && (
-                    <span className="text-[#f59e0b]"> &middot; {eReportsPending} PENDING</span>
-                  )}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className="text-[#8899bb] text-[10px] tracking-widest">
+                    {eBlacklist.length} BLOCKED &middot; {eSigContrib} SHARED
+                    {eReportsPending > 0 && (
+                      <span className="text-[#f59e0b]"> &middot; {eReportsPending} PENDING</span>
+                    )}
+                  </span>
+                  <InfoPopover panel="blacklist" tone="dark" />
+                </div>
               </div>
 
               {eBlacklist.length === 0 ? (
@@ -264,10 +333,11 @@ export default function Dashboard() {
   );
 }
 
-function PanelHeader({ title }: { title: string }) {
+function PanelHeader({ title, panel }: { title: string; panel: PanelGuideId }) {
   return (
-    <div className="flex items-center gap-2 px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5]">
+    <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-[#cccccc] bg-[#f5f5f5]">
       <span className="text-[#0d1b3e] text-[10px] tracking-widest uppercase font-bold">{title}</span>
+      <InfoPopover panel={panel} />
     </div>
   );
 }
