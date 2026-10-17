@@ -86,7 +86,11 @@ export default function ThreatAnalyticsTab() {
   );
   const liveRows = useMemo(
     () => (data?.live ?? []).map(point => {
-      const row: Record<string, number | string> = { time: clock(point.t), pps: point.pps, blocked: point.blocked };
+      // "Normal" is everything the agents saw that was NOT blocked. Showing it
+      // explicitly keeps an operator from reading a busy-but-healthy network as
+      // an attack (the panel's anti-false-alarm ask).
+      const normal = Math.max(0, point.pps - point.blocked);
+      const row: Record<string, number | string> = { time: clock(point.t), pps: point.pps, normal, blocked: point.blocked };
       agentKeys.forEach(a => { row[a.key] = point.agents[a.mac] ?? 0; });
       return row;
     }),
@@ -96,8 +100,13 @@ export default function ThreatAnalyticsTab() {
   const periodRows = data ? data[period] : [];
   const periodLabel = { daily: 'per hour, last 24 hours', weekly: 'per day, last 7 days', monthly: 'per day, last 30 days' }[period];
 
+  const normalNow = session
+    ? Math.max(0, (session.currentPps ?? 0) - (session.currentBlockedPps ?? 0))
+    : undefined;
+
   const statCards = [
     { label: 'ARP Traffic Now', value: session?.currentPps, unit: 'packets / s, all agents' },
+    { label: 'Normal Now', value: normalNow, unit: 'packets / s, not blocked' },
     { label: 'Blocked Now', value: session?.currentBlockedPps, unit: 'blocks / s, all agents' },
     { label: 'Peak Traffic', value: session?.peakPps, unit: 'packets / s, since relay start' },
     { label: 'Average Traffic', value: session?.avgPps, unit: 'packets / s, since relay start' },
@@ -114,7 +123,7 @@ export default function ThreatAnalyticsTab() {
   return (
     <div className="flex flex-col gap-4">
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         {statCards.map(s => (
           <div key={s.label} className="border border-[#e2e8f0] bg-white p-4 flex flex-col gap-1">
             <span className="text-[#94A3B8] text-[10px] uppercase tracking-widest">{s.label}</span>
@@ -141,6 +150,10 @@ export default function ThreatAnalyticsTab() {
                   <stop offset="5%" stopColor="#DC2626" stopOpacity={0.3} />
                   <stop offset="95%" stopColor="#DC2626" stopOpacity={0.02} />
                 </linearGradient>
+                <linearGradient id="gradNormal" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#16A34A" stopOpacity={0.28} />
+                  <stop offset="95%" stopColor="#16A34A" stopOpacity={0.02} />
+                </linearGradient>
               </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" />
               <XAxis dataKey="time" tick={AXIS_TICK} interval="preserveStartEnd" minTickGap={40} />
@@ -148,6 +161,7 @@ export default function ThreatAnalyticsTab() {
               <Tooltip content={<CustomTooltip />} />
               <Legend wrapperStyle={LEGEND_STYLE} />
               <Area type="monotone" dataKey="pps" stroke="#1E3A8A" strokeWidth={2} fill="url(#gradPPS)" name="All agents" dot={false} isAnimationActive={false} />
+              <Area type="monotone" dataKey="normal" stroke="#16A34A" strokeWidth={2} fill="url(#gradNormal)" name="Normal" dot={false} isAnimationActive={false} />
               <Area type="monotone" dataKey="blocked" stroke="#DC2626" strokeWidth={2} fill="url(#gradBlocked)" name="Blocked" dot={false} isAnimationActive={false} />
               {agentKeys.length > 1 && agentKeys.map(a => (
                 <Line key={a.key} type="monotone" dataKey={a.key} stroke={a.colour} strokeWidth={1.5}
