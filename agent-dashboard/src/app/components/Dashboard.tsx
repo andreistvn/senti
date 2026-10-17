@@ -72,10 +72,9 @@ export default function Dashboard() {
           </span>
           <UserGuideDialog open={guideOpen} onOpenChange={handleGuideOpenChange} />
           {!live && (
-            <span className="flex items-center gap-2 text-[#f59e0b]" title="Tray daemon not detected — showing simulated data">
+            <span className="flex items-center gap-2 text-[#f59e0b]" title="Tray daemon not detected — no live data to show">
               <span className="w-2 h-2 rounded-full bg-[#f59e0b] animate-pulse inline-block" />
-              MOCK MODE
-              <InfoPopover panel="mockMode" tone="dark" />
+              SERVICE NOT RUNNING
             </span>
           )}
         </div>
@@ -240,6 +239,16 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody>
+                  {eLogs.length === 0 && (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-10 text-center">
+                        <p className="text-[#0d1b3e] text-xs font-bold tracking-wider">No threats detected yet</p>
+                        <p className="text-[#555] text-xs mt-1">
+                          When SentiNet blocks an attack on this agent, it will be listed here.
+                        </p>
+                      </td>
+                    </tr>
+                  )}
                   {eLogs.map(log => (
                     <tr key={log.id} className="border-b border-[#f0f0f0] bg-[#fff5f5] hover:bg-[#ffe8e8] transition-colors">
                       <td className="px-4 py-3 text-[#555] text-[10px] font-mono">{log.timestamp}</td>

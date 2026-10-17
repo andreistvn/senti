@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { getSopSummary, type SopScenario, type SopSummary } from '../lib/adminApi';
+import { durationParts, formatDuration } from '../lib/format';
 
 interface SopMetric {
   label: string;
@@ -73,7 +74,7 @@ function buildCards(summary: SopSummary | null): SopCard[] {
   const matrix = liveMode ? live : evaluation;
   const latency = detection?.latency;
   const latencyText = latency
-    ? `last detection after ${latency.packets} packets, ${(latency.ms / 1000).toFixed(2)} s`
+    ? `last detection after ${latency.packets} packets, ${formatDuration(latency.ms)}`
     : null;
 
   const detectionLines: string[] = [];
@@ -109,12 +110,12 @@ function buildCards(summary: SopSummary | null): SopCard[] {
     ];
     if (ttb.n > 0) {
       parts.push(`n = ${ttb.n}`);
-      parts.push(`mean ${fixed(ttb.meanTtbMs, 1)} ms`);
+      parts.push(`mean ${formatDuration(ttb.meanTtbMs, 1)}`);
       if (ttb.varianceTtbMs != null) parts.push(`variance ${fixed(ttb.varianceTtbMs, 1)}`);
     }
     if (trial.ttbMs != null && trial.agentClockTtbMs != null) {
       const skew = Math.abs(trial.agentClockTtbMs - trial.ttbMs);
-      if (skew >= 50) parts.push(`agent clocks ${fixed(skew, 0)} ms apart, corrected`);
+      if (skew >= 50) parts.push(`agent clocks ${formatDuration(skew, 0)} apart, corrected`);
     }
     ttbFooter = parts.join(' · ');
   }
@@ -170,7 +171,7 @@ function buildCards(summary: SopSummary | null): SopCard[] {
         rows: [[
           { label: 'T-Enforced', value: clockMs(trial?.tEnforcedMs) },
           { label: 'T-Detected', value: clockMs(trial?.tDetectedMs) },
-          { label: 'TTB', unit: 'ms', value: fixed(trial?.ttbMs, 0) },
+          { label: 'TTB', ...durationParts(trial?.ttbMs, 0) },
         ]],
       }],
       footer: ttbFooter,
