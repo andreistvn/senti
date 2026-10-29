@@ -61,7 +61,7 @@ export default function DetectionLogsTab({
       { header: 'Tier', get: d => d.tier },
       { header: 'Attack Type', get: d => d.attackType },
       { header: 'Source MAC', get: d => d.sourceMac },
-      { header: 'Confidence', get: d => confOf(d) },
+      { header: 'Detection Confidence', get: d => confOf(d) },
       { header: 'Action', get: d => d.action },
       { header: 'Detail', get: d => d.detail },
     ]);
@@ -122,7 +122,7 @@ export default function DetectionLogsTab({
                 <th className="p-3 border-r border-[#e2e8f0]">Tier</th>
                 <th className="p-3 border-r border-[#e2e8f0]">Attack Type</th>
                 <th className="p-3 border-r border-[#e2e8f0]">Source MAC</th>
-                <th className="p-3 border-r border-[#e2e8f0]">Confidence<InfoHint text={confidenceLegend(thresholdPct)} /></th>
+                <th className="p-3 border-r border-[#e2e8f0]">Detection Confidence<InfoHint text={confidenceLegend(thresholdPct)} /></th>
                 <th className="p-3 border-r border-[#e2e8f0]">Action</th>
                 <th className="p-3">Detail</th>
               </tr>
@@ -152,7 +152,7 @@ export default function DetectionLogsTab({
       </div>
 
       <div className="border-t border-[#e2e8f0] p-2 px-4 text-[9px] text-[#94A3B8] uppercase tracking-widest shrink-0">
-        Red = blocked · Amber = detected, not blocked · Confidence = model score at detection
+        Red = blocked · Amber = detected, not blocked · Detection confidence = model score that got the MAC blacklisted (Tier 1/3 rows inherit it)
       </div>
     </section>
   );

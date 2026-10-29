@@ -532,21 +532,29 @@ async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str
     if not source_mac:
         return {"status": "error", "detail": "missing sourceMac"}
 
-    attack_type = data.get("attackType", "Anomalous ARP")
+    attack_type = data.get("attackType", "ARP Spoofing")
     tier = data.get("tier", "Tier 2")
     action = data.get("action", "Blocked")
     confidence = data.get("confidence", "99.9%")
     detail = data.get("detail")
     client_event_id = data.get("clientEventId")
+    # A Tier-2 report sent at the moment of detection carries the score at the
+    # threshold crossing; the agent follows it with the final one
+    # (confidence_update). Agents that predate this send no flag: final.
+    provisional = data.get("confidenceFinal") is False and bool(client_event_id)
 
     try:
         threat_dict = state.add_threat(
             source_mac, attack_type, tier, action, confidence,
             detail=detail, client_event_id=client_event_id,
+            defer_ledger=provisional,
         )
     except Exception as exc:
         print(f"[WebSocket] Failed to record attack report from {reporter_name}: {exc}")
         return {"status": "error", "detail": str(exc)}
+
+    if provisional and threat_dict.get('isNew', True):
+        asyncio.create_task(_ledger_fallback(client_event_id))
 
     if not threat_dict.get('isNew', True):
         # Already have this exact report (agent retry, or a backfill re-offering
@@ -600,6 +608,36 @@ async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str
     await sio.emit("blacklist_update", update, skip_sid=reporter_sid)
 
     return {"status": "ok", "id": threat_dict["id"], "duplicate": False}
+
+
+# How long the relay waits for a detection's finalized confidence before
+# writing the provisional one to the ledger. The agent sends it one 5-second
+# window after detection.
+CONFIDENCE_LEDGER_TIMEOUT_S = 15
+
+
+async def _ledger_fallback(client_event_id: str) -> None:
+    await asyncio.sleep(CONFIDENCE_LEDGER_TIMEOUT_S)
+    if state.flush_deferred_ledger(client_event_id):
+        print(f"[WebSocket] No finalized confidence for {client_event_id[:8]}…; "
+              f"ledger written with the provisional score.")
+
+
+@sio.event
+async def confidence_update(sid, data):
+    """An agent's finalized confidence for a Tier-2 detection it reported."""
+    client_event_id = (data or {}).get("clientEventId")
+    confidence = (data or {}).get("confidence")
+    if not client_event_id or not confidence:
+        return
+    result = state.finalize_threat_confidence(client_event_id, confidence)
+    if result is None:
+        print(f"[WebSocket] confidence_update for unknown detection {client_event_id[:8]}…")
+        return
+    print(f"[WebSocket] Confidence for {result['mac']} finalized at {confidence}")
+    # Agents that took the MAC from the broadcast hold the provisional value.
+    if result['blacklistUpdated']:
+        await sio.emit("blacklist_confidence", {"mac": result['mac'], "confidence": confidence}, skip_sid=sid)
 
 
 @sio.event

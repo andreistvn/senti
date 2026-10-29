@@ -105,6 +105,14 @@ export default function ReportsTab({
 
   const tiers = useMemo(() => Array.from(new Set(detections.map(d => d.tier))).sort(), [detections]);
 
+  // MAC → confidence, for rows that arrive without their own (older records).
+  const confByMac = useMemo(() => {
+    const map = new Map<string, string>();
+    blacklist.forEach(b => map.set(b.mac.toUpperCase(), b.confidence));
+    return map;
+  }, [blacklist]);
+  const confOf = (d: Detection) => d.confidence || confByMac.get(d.sourceMac.toUpperCase()) || '';
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return detections.filter(d => {
@@ -159,7 +167,7 @@ export default function ReportsTab({
       { header: 'Tier', get: d => d.tier },
       { header: 'Attack Type', get: d => d.attackType },
       { header: 'Source MAC', get: d => d.sourceMac },
-      { header: 'Confidence', get: d => d.confidence },
+      { header: 'Detection Confidence', get: d => confOf(d) },
       { header: 'Action', get: d => d.action },
       { header: 'Detail', get: d => d.detail },
     ]);
@@ -251,7 +259,7 @@ export default function ReportsTab({
                   <th className="p-3 border-r border-[#e2e8f0]">Tier</th>
                   <th className="p-3 border-r border-[#e2e8f0]">Attack Type</th>
                   <th className="p-3 border-r border-[#e2e8f0]">Source MAC</th>
-                  <th className="p-3 border-r border-[#e2e8f0]">Confidence<InfoHint text={confidenceLegend(thresholdPct)} /></th>
+                  <th className="p-3 border-r border-[#e2e8f0]">Detection Confidence<InfoHint text={confidenceLegend(thresholdPct)} /></th>
                   <th className="p-3">Action</th>
                 </tr>
               </thead>
@@ -262,8 +270,8 @@ export default function ReportsTab({
                     <td className="p-3 border-r border-[#e2e8f0] whitespace-nowrap">{d.tier}</td>
                     <td className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">{d.attackType}</td>
                     <td className="p-3 border-r border-[#e2e8f0]">{d.sourceMac || '—'}</td>
-                    <td className="p-3 border-r border-[#e2e8f0] font-bold" style={{ color: d.confidence ? confidenceColor(d.confidence, thresholdPct) : '#94A3B8' }}>
-                      {d.confidence || '—'}
+                    <td className="p-3 border-r border-[#e2e8f0] font-bold" style={{ color: confOf(d) ? confidenceColor(confOf(d), thresholdPct) : '#94A3B8' }}>
+                      {confOf(d) || '—'}
                     </td>
                     <td className="p-3 font-bold whitespace-nowrap" style={{ color: ACTION_COLOR[actionTone(d.action)] }}>{d.action}</td>
                   </tr>
