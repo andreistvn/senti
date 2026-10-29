@@ -51,7 +51,8 @@ export function confidenceColor(
 // Shared explanation shown in the column-header tooltips.
 export function confidenceLegend(thresholdPct: number): string {
   return (
-    `Model certainty this device is attacking (0–100%). ` +
+    `Model certainty this device is attacking (0–100%), scored over the full 5-second window after detection. ` +
+    `Tier 1 and Tier 3 rows carry the score from the detection that blacklisted the device. ` +
     `The ML threshold is ${thresholdPct.toFixed(0)}% — at or above it a device is treated as malicious. ` +
     `Grey = below the threshold (would not block). ` +
     `Amber = just above it, borderline, so watch for false alarms. ` +

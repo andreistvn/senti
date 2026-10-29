@@ -111,7 +111,14 @@ function buildCards(summary: SopSummary | null): SopCard[] {
     if (ttb.n > 0) {
       parts.push(`n = ${ttb.n}`);
       parts.push(`mean ${formatDuration(ttb.meanTtbMs, 1)}`);
-      if (ttb.varianceTtbMs != null) parts.push(`variance ${fixed(ttb.varianceTtbMs, 1)}`);
+      // Variance is in the mean's unit squared, so it follows the mean into
+      // seconds once the mean reaches 1,000 ms.
+      if (ttb.varianceTtbMs != null) {
+        const inSeconds = ttb.meanTtbMs != null && Math.abs(ttb.meanTtbMs) >= 1000;
+        parts.push(inSeconds
+          ? `variance ${(ttb.varianceTtbMs / 1e6).toFixed(3)} s²`
+          : `variance ${fixed(ttb.varianceTtbMs, 1)} ms²`);
+      }
     }
     if (trial.ttbMs != null && trial.agentClockTtbMs != null) {
       const skew = Math.abs(trial.agentClockTtbMs - trial.ttbMs);

@@ -22,6 +22,14 @@ export interface AdminLogEntry {
   id: number;
   timestamp: string;
   message: string;
+  // Structured copy of the detection, sent by /threats alongside `message`.
+  tier?: string | null;
+  attackType?: string | null;
+  sourceMac?: string | null;
+  action?: string | null;
+  detail?: string | null;
+  confidence?: string | null;
+  createdTs?: number | null; // epoch seconds, relay clock
 }
 
 export interface AdminBlacklistEntry {

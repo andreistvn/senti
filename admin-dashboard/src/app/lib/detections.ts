@@ -1,16 +1,14 @@
-// Frontend-only detection model.
+// Detection model for the Detection Logs and Reports tabs.
 //
-// The backend /threats endpoint flattens each detection into one sentence:
-//   "[Tier-2] ARP Spoofing from AA:BB:CC:DD:EE:FF. Action: BLOCKED - detail"
-// Until the backend exposes the raw fields, we parse that string back into
-// columns here so the admin can show a real detection log, filter it, and
-// export it. (A one-line backend serializer change would make this exact.)
+// /threats sends each detection's fields separately, and also flattened into
+// one sentence for the Dashboard's log feed:
+//   "[Tier 2] ARP Spoofing from AA:BB:CC:DD:EE:FF. Action: Blocked - detail"
+// The fields are used when present. Entries without them (the offline seed,
+// browser-side ADMIN/SYSTEM notices) fall back to parsing that sentence.
 
-export interface RawLog {
-  id: number;
-  timestamp: string;
-  message: string;
-}
+import type { AdminLogEntry } from './adminApi';
+
+export type RawLog = AdminLogEntry;
 
 export interface Detection {
   id: number;
@@ -20,6 +18,8 @@ export interface Detection {
   sourceMac: string;    // "" when not a detection
   action: string;       // BLOCKED / DETECTED / COUNTED / ...
   detail: string;
+  confidence: string;   // "87.3%", "N/A", or "" when unknown
+  createdMs: number | null; // epoch ms, relay clock; null when unknown
   raw: string;          // the original message, for search / fallback
   isDetection: boolean; // false for ADMIN / SYSTEM / POLICY notices
 }
@@ -28,6 +28,22 @@ const DETECTION_RE =
   /^\[([^\]]+)\]\s*(.+?)\s+from\s+(.+?)\.\s*Action:\s*([A-Za-z_]+)(?:\s*-\s*(.*))?$/;
 
 export function parseDetection(log: RawLog): Detection {
+  const createdMs = log.createdTs != null ? log.createdTs * 1000 : null;
+  if (log.tier && log.sourceMac) {
+    return {
+      id: log.id,
+      timestamp: log.timestamp,
+      tier: log.tier,
+      attackType: log.attackType ?? 'Unknown',
+      sourceMac: log.sourceMac,
+      action: (log.action ?? '—').toUpperCase(),
+      detail: log.detail ?? '',
+      confidence: log.confidence ?? '',
+      createdMs,
+      raw: log.message,
+      isDetection: true,
+    };
+  }
   const m = log.message.match(DETECTION_RE);
   if (!m) {
     return {
@@ -38,6 +54,8 @@ export function parseDetection(log: RawLog): Detection {
       sourceMac: '',
       action: '—',
       detail: '',
+      confidence: '',
+      createdMs,
       raw: log.message,
       isDetection: false,
     };
@@ -50,6 +68,8 @@ export function parseDetection(log: RawLog): Detection {
     sourceMac: m[3].trim(),
     action: m[4].trim().toUpperCase(),
     detail: (m[5] ?? '').trim(),
+    confidence: '',
+    createdMs,
     raw: log.message,
     isDetection: true,
   };
@@ -88,5 +108,6 @@ export function downloadCSV(filename: string, csv: string): void {
   a.href = url;
   a.download = filename;
   a.click();
-  URL.revokeObjectURL(url);
+  // Revoking in the same tick can cancel the download in some browsers.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

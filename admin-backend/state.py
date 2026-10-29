@@ -83,6 +83,9 @@ class DBThreat(Base):
     tier = Column(String)
     action = Column(String)
     detail = Column(String, nullable=True)  # e.g. "blocked via Bayanihan, reported by Agent A at 14:02:08"
+    # The model's score as the agent sent it ("87.3%"), or "N/A" for a repeat
+    # block that carries none. Shown per row in Detection Logs and Reports.
+    confidence = Column(String, nullable=True)
     # Agent-generated uuid4, carried end-to-end from CaptureEngine. Lets add_threat()
     # dedupe: once agent-side reporting can retry (BayanihanClient's pending-report
     # queue) and backfill on reconnect (register_agent's recentEvents), the same
@@ -229,7 +232,7 @@ def _migrate_schema():
     additions = {
         'ledger_entries': {'txid': 'VARCHAR', 'created_at': 'FLOAT'},
         'agents': {'ram_mb': 'FLOAT', 'last_seen': 'FLOAT', 'ram_process_percent': 'FLOAT'},
-        'threats': {'detail': 'VARCHAR', 'client_event_id': 'VARCHAR', 'created_ts': 'FLOAT'},
+        'threats': {'detail': 'VARCHAR', 'client_event_id': 'VARCHAR', 'created_ts': 'FLOAT', 'confidence': 'VARCHAR'},
         'ttb_detections': {'agent_delay_ms': 'FLOAT'},
         'ttb_enforcements': {'agent_delay_ms': 'FLOAT'},
     }
@@ -1322,6 +1325,8 @@ def get_threats() -> List[Dict[str, Any]]:
             'tier': t.tier,
             'action': t.action,
             'detail': t.detail,
+            'confidence': t.confidence,
+            'createdTs': t.created_ts,
         } for t in db_threats
     ]
     db.close()
@@ -1432,8 +1437,15 @@ def get_telemetry_summary() -> Dict[str, Any]:
     }
 
 
+# Tier-2 detections whose ledger write waits for the agent's finalized
+# confidence: client_event_id -> threat_dict. See finalize_threat_confidence().
+_deferred_ledger: Dict[str, Dict[str, Any]] = {}
+_deferred_ledger_lock = threading.Lock()
+
+
 def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confidence: str = "99.9%",
-                detail: Optional[str] = None, client_event_id: Optional[str] = None) -> Dict[str, Any]:
+                detail: Optional[str] = None, client_event_id: Optional[str] = None,
+                defer_ledger: bool = False) -> Dict[str, Any]:
     """
     Insert one threat record. Idempotent when `client_event_id` is given: a
     second call with the same id (an agent-side retry, or a register_agent
@@ -1468,6 +1480,7 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
         tier=tier,
         action=action,
         detail=detail,
+        confidence=confidence,
         client_event_id=client_event_id,
         created_ts=time.time(),
     )
@@ -1488,7 +1501,64 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
     }
     db.close()
 
-    # Try publishing to MultiChain
-    write_to_multichain(threat_dict)
+    # Try publishing to MultiChain. A provisional confidence is held back so
+    # the ledger records the final one.
+    if defer_ledger and client_event_id:
+        with _deferred_ledger_lock:
+            _deferred_ledger[client_event_id] = threat_dict
+    else:
+        write_to_multichain(threat_dict)
 
     return threat_dict
+
+
+def flush_deferred_ledger(client_event_id: str) -> bool:
+    """Write a held-back detection to the ledger as it stands. False if none was held."""
+    with _deferred_ledger_lock:
+        threat_dict = _deferred_ledger.pop(client_event_id, None)
+    if threat_dict is None:
+        return False
+    write_to_multichain(threat_dict)
+    return True
+
+
+def finalize_threat_confidence(client_event_id: str, confidence: str) -> Optional[Dict[str, Any]]:
+    """
+    Apply an agent's finalized confidence to the detection it reported.
+
+    The detection's threat row takes the new value, as do the repeat-block
+    rows for the MAC logged in the meantime, and the blacklist entry if this
+    detection is the one that created it. The ledger write held
+    back by add_threat is made now, with the final value. Returns the MAC and
+    whether the blacklist entry changed, or None for an unknown detection.
+    """
+    db = SessionLocal()
+    try:
+        threat = db.query(DBThreat).filter(DBThreat.client_event_id == client_event_id).first()
+        if threat is None:
+            return None
+        provisional = threat.confidence
+        threat.confidence = confidence
+        # Repeat blocks (Tier 1) and relayed blocks (Tier 3) of this MAC logged
+        # before the final value arrived carry the provisional one.
+        db.query(DBThreat).filter(
+            DBThreat.source_mac == threat.source_mac,
+            DBThreat.tier != 'Tier 2',
+            DBThreat.confidence == provisional,
+        ).update({DBThreat.confidence: confidence}, synchronize_session=False)
+        entry = db.query(DBBlacklistEntry).filter(DBBlacklistEntry.mac == threat.source_mac).first()
+        blacklist_updated = (entry is not None and entry.tier == threat.tier
+                             and entry.confidence == provisional)
+        if blacklist_updated:
+            entry.confidence = confidence
+        db.commit()
+        mac = threat.source_mac
+    finally:
+        db.close()
+
+    with _deferred_ledger_lock:
+        held = _deferred_ledger.get(client_event_id)
+        if held is not None:
+            held['confidence'] = confidence
+    flush_deferred_ledger(client_event_id)
+    return {'mac': mac, 'blacklistUpdated': blacklist_updated}
