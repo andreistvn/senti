@@ -27,7 +27,7 @@ export default function DetectionLogsTab({
   const [action, setAction] = useState<ActionFilter>('all');
   const [onlyDetections, setOnlyDetections] = useState(true);
 
-  // MAC → confidence, so we can enrich rows the flat /threats message omits.
+  // MAC → confidence, for rows that arrive without their own (older records).
   const confByMac = useMemo(() => {
     const map = new Map<string, string>();
     blacklist.forEach(b => map.set(b.mac.toUpperCase(), b.confidence));
@@ -53,7 +53,7 @@ export default function DetectionLogsTab({
     });
   }, [detections, query, tier, action, onlyDetections]);
 
-  const confOf = (d: Detection) => confByMac.get(d.sourceMac.toUpperCase()) ?? '';
+  const confOf = (d: Detection) => d.confidence || confByMac.get(d.sourceMac.toUpperCase()) || '';
 
   const handleExport = () => {
     const csv = toCSV(filtered, [
@@ -152,7 +152,7 @@ export default function DetectionLogsTab({
       </div>
 
       <div className="border-t border-[#e2e8f0] p-2 px-4 text-[9px] text-[#94A3B8] uppercase tracking-widest shrink-0">
-        Red = blocked · Amber = detected, not blocked · Confidence shown where the MAC is on the blacklist
+        Red = blocked · Amber = detected, not blocked · Confidence = model score at detection
       </div>
     </section>
   );

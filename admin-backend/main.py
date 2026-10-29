@@ -105,6 +105,16 @@ class ThreatLogResponse(BaseModel):
     id: int
     timestamp: str
     message: str
+    # The same detection as separate fields, so the Detection Logs and Reports
+    # tabs need not parse `message` back apart.
+    tier: Optional[str] = None
+    attackType: Optional[str] = None
+    sourceMac: Optional[str] = None
+    action: Optional[str] = None
+    detail: Optional[str] = None
+    confidence: Optional[str] = None
+    # Epoch seconds when the relay received it; `timestamp` has no date.
+    createdTs: Optional[float] = None
 
 
 class LedgerResponse(BaseModel):
@@ -262,7 +272,14 @@ async def list_threats(sentinet_admin_session: Optional[str] = Cookie(None)):
             message=(
                 f"[{t['tier']}] {t['attackType']} from {t['sourceMac']}. Action: {t['action']}"
                 + (f" - {t['detail']}" if t.get('detail') else "")
-            )
+            ),
+            tier=t['tier'],
+            attackType=t['attackType'],
+            sourceMac=t['sourceMac'],
+            action=t['action'],
+            detail=t['detail'],
+            confidence=t['confidence'],
+            createdTs=t['createdTs'],
         )
         for t in threats
     ]

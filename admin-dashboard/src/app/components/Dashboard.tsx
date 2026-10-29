@@ -271,6 +271,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
           blacklist={blacklist}
           blockchainMetrics={blockchainMetrics}
           connectedAgents={blockchainMetrics.connectedAgents}
+          thresholdPct={thresholdPct}
         />
       )}
 

@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import type { AdminBlacklistEntry, AdminBlockchainMetrics } from '../lib/adminApi';
 import {
-  parseDetection, actionTone, ACTION_COLOR, toCSV, downloadCSV, type RawLog,
+  parseDetection, actionTone, ACTION_COLOR, toCSV, downloadCSV, type RawLog, type Detection,
 } from '../lib/detections';
+import { confidenceColor, confidenceLegend } from '../lib/confidence';
+import { InfoHint } from './InfoHint';
 
 // A generated report over the detections the dashboard has collected: a metrics
 // summary plus a filtered table, exportable to CSV or print. All aggregation is
@@ -10,19 +12,39 @@ import {
 
 type ActionFilter = 'all' | 'blocked' | 'detected';
 
-// "09:30" (from a time input) vs "09:30:15" (a log stamp): compare HH:MM only.
-function withinTime(stamp: string, from: string, to: string): boolean {
-  const hm = stamp.slice(0, 5);
-  if (from && hm < from) return false;
-  if (to && hm > to) return false;
+// `from` / `to` come from datetime-local inputs ("2026-10-30T09:30"). Records
+// are kept across relay restarts and days, so the range is checked against the
+// relay's receive time. A record without one can only be placed by its clock
+// time, so it is compared on HH:MM alone.
+function withinRange(d: Detection, from: string, to: string): boolean {
+  if (d.createdMs != null) {
+    if (from && d.createdMs < new Date(from).getTime()) return false;
+    // `to` is inclusive of its whole minute.
+    if (to && d.createdMs >= new Date(to).getTime() + 60_000) return false;
+    return true;
+  }
+  const hm = d.timestamp.slice(0, 5);
+  if (from && hm < from.slice(11, 16)) return false;
+  if (to && hm > to.slice(11, 16)) return false;
   return true;
 }
 
-function StatCard({ label, value, color }: { label: string; value: number | string; color?: string }) {
+function pad(n: number) {
+  return String(n).padStart(2, '0');
+}
+
+// "2026-10-30 09:30:15" when the record has a date, else its clock time.
+function stampOf(d: Detection): string {
+  if (d.createdMs == null) return d.timestamp;
+  const t = new Date(d.createdMs);
+  return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())} ${d.timestamp}`;
+}
+
+function StatCard({ label, value, color, small }: { label: string; value: number | string; color?: string; small?: boolean }) {
   return (
     <div className="border border-[#e2e8f0] bg-white p-4 flex flex-col gap-1">
       <span className="text-[#94A3B8] text-[10px] uppercase tracking-widest">{label}</span>
-      <span className="font-['JetBrains_Mono',_monospace] text-3xl font-bold" style={{ color: color ?? '#0F172A' }}>
+      <span className={`font-['JetBrains_Mono',_monospace] font-bold ${small ? 'text-sm break-words' : 'text-3xl'}`} style={{ color: color ?? '#0F172A' }}>
         {typeof value === 'number' ? value.toLocaleString() : value}
       </span>
     </div>
@@ -62,11 +84,13 @@ export default function ReportsTab({
   blacklist,
   blockchainMetrics,
   connectedAgents,
+  thresholdPct,
 }: {
   logs: RawLog[];
   blacklist: AdminBlacklistEntry[];
   blockchainMetrics: AdminBlockchainMetrics;
   connectedAgents: number;
+  thresholdPct: number;
 }) {
   const [query, setQuery] = useState('');
   const [tier, setTier] = useState('all');
@@ -86,7 +110,7 @@ export default function ReportsTab({
     return detections.filter(d => {
       if (tier !== 'all' && d.tier !== tier) return false;
       if (action !== 'all' && actionTone(d.action) !== action) return false;
-      if (!withinTime(d.timestamp, from, to)) return false;
+      if (!withinRange(d, from, to)) return false;
       if (q && !d.raw.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -111,7 +135,9 @@ export default function ReportsTab({
     };
   }, [filtered]);
 
-  const rangeLabel = (from || to) ? `${from || '00:00'}–${to || '23:59'}` : 'all time (session)';
+  const rangeLabel = (from || to)
+    ? `${from ? from.replace('T', ' ') : 'start'} – ${to ? to.replace('T', ' ') : 'now'}`
+    : 'all records';
 
   const handleExport = () => {
     const summary =
@@ -124,14 +150,16 @@ export default function ReportsTab({
       `Blocked,${metrics.blocked}\n` +
       `Detected only,${metrics.detectedOnly}\n` +
       `Unique source MACs,${metrics.uniqueMacs}\n` +
-      `Blacklisted MACs,${blacklist.length}\n` +
-      `Connected agents,${connectedAgents}\n` +
-      `Total incidents (ledger),${blockchainMetrics.totalIncidents}\n\n`;
+      `Blacklisted MACs (network now),${blacklist.length}\n` +
+      `Connected agents (now),${connectedAgents}\n` +
+      `Total incidents (ledger),${blockchainMetrics.totalIncidents}\n` +
+      `ML threshold,${thresholdPct.toFixed(0)}%\n\n`;
     const rows = toCSV(filtered, [
-      { header: 'Time', get: d => d.timestamp },
+      { header: 'Time', get: d => stampOf(d) },
       { header: 'Tier', get: d => d.tier },
       { header: 'Attack Type', get: d => d.attackType },
       { header: 'Source MAC', get: d => d.sourceMac },
+      { header: 'Confidence', get: d => d.confidence },
       { header: 'Action', get: d => d.action },
       { header: 'Detail', get: d => d.detail },
     ]);
@@ -166,11 +194,11 @@ export default function ReportsTab({
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-[9px] uppercase tracking-widest text-[#94A3B8]">From</label>
-          <input type="time" value={from} onChange={e => setFrom(e.target.value)} className={selectCls} />
+          <input type="datetime-local" value={from} onChange={e => setFrom(e.target.value)} className={selectCls} />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-[9px] uppercase tracking-widest text-[#94A3B8]">To</label>
-          <input type="time" value={to} onChange={e => setTo(e.target.value)} className={selectCls} />
+          <input type="datetime-local" value={to} onChange={e => setTo(e.target.value)} className={selectCls} />
         </div>
         <div className="ml-auto flex items-center gap-2">
           <button onClick={() => { setQuery(''); setTier('all'); setAction('all'); setFrom(''); setTo(''); }}
@@ -194,10 +222,11 @@ export default function ReportsTab({
         <StatCard label="Blocked" value={metrics.blocked} color={ACTION_COLOR.blocked} />
         <StatCard label="Detected, Not Blocked" value={metrics.detectedOnly} color={ACTION_COLOR.detected} />
         <StatCard label="Unique Source MACs" value={metrics.uniqueMacs} />
-        <StatCard label="Blacklisted MACs" value={blacklist.length} />
-        <StatCard label="Connected Agents" value={connectedAgents} />
+        {/* These three describe the network as it is now, not the filtered rows. */}
+        <StatCard label="Blacklisted MACs (Now)" value={blacklist.length} />
+        <StatCard label="Connected Agents (Now)" value={connectedAgents} />
         <StatCard label="Total Incidents (Ledger)" value={blockchainMetrics.totalIncidents} />
-        <StatCard label="Range" value={rangeLabel} />
+        <StatCard label="Range" value={rangeLabel} small />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -222,16 +251,20 @@ export default function ReportsTab({
                   <th className="p-3 border-r border-[#e2e8f0]">Tier</th>
                   <th className="p-3 border-r border-[#e2e8f0]">Attack Type</th>
                   <th className="p-3 border-r border-[#e2e8f0]">Source MAC</th>
+                  <th className="p-3 border-r border-[#e2e8f0]">Confidence<InfoHint text={confidenceLegend(thresholdPct)} /></th>
                   <th className="p-3">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(d => (
                   <tr key={d.id} className="border-b border-[#e2e8f0] hover:bg-slate-50 transition">
-                    <td className="p-3 border-r border-[#e2e8f0] text-[#64748B] whitespace-nowrap">{d.timestamp}</td>
+                    <td className="p-3 border-r border-[#e2e8f0] text-[#64748B] whitespace-nowrap">{stampOf(d)}</td>
                     <td className="p-3 border-r border-[#e2e8f0] whitespace-nowrap">{d.tier}</td>
                     <td className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">{d.attackType}</td>
                     <td className="p-3 border-r border-[#e2e8f0]">{d.sourceMac || '—'}</td>
+                    <td className="p-3 border-r border-[#e2e8f0] font-bold" style={{ color: d.confidence ? confidenceColor(d.confidence, thresholdPct) : '#94A3B8' }}>
+                      {d.confidence || '—'}
+                    </td>
                     <td className="p-3 font-bold whitespace-nowrap" style={{ color: ACTION_COLOR[actionTone(d.action)] }}>{d.action}</td>
                   </tr>
                 ))}

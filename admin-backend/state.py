@@ -83,6 +83,9 @@ class DBThreat(Base):
     tier = Column(String)
     action = Column(String)
     detail = Column(String, nullable=True)  # e.g. "blocked via Bayanihan, reported by Agent A at 14:02:08"
+    # The model's score as the agent sent it ("87.3%"), or "N/A" for a repeat
+    # block that carries none. Shown per row in Detection Logs and Reports.
+    confidence = Column(String, nullable=True)
     # Agent-generated uuid4, carried end-to-end from CaptureEngine. Lets add_threat()
     # dedupe: once agent-side reporting can retry (BayanihanClient's pending-report
     # queue) and backfill on reconnect (register_agent's recentEvents), the same
@@ -229,7 +232,7 @@ def _migrate_schema():
     additions = {
         'ledger_entries': {'txid': 'VARCHAR', 'created_at': 'FLOAT'},
         'agents': {'ram_mb': 'FLOAT', 'last_seen': 'FLOAT', 'ram_process_percent': 'FLOAT'},
-        'threats': {'detail': 'VARCHAR', 'client_event_id': 'VARCHAR', 'created_ts': 'FLOAT'},
+        'threats': {'detail': 'VARCHAR', 'client_event_id': 'VARCHAR', 'created_ts': 'FLOAT', 'confidence': 'VARCHAR'},
         'ttb_detections': {'agent_delay_ms': 'FLOAT'},
         'ttb_enforcements': {'agent_delay_ms': 'FLOAT'},
     }
@@ -1322,6 +1325,8 @@ def get_threats() -> List[Dict[str, Any]]:
             'tier': t.tier,
             'action': t.action,
             'detail': t.detail,
+            'confidence': t.confidence,
+            'createdTs': t.created_ts,
         } for t in db_threats
     ]
     db.close()
@@ -1468,6 +1473,7 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
         tier=tier,
         action=action,
         detail=detail,
+        confidence=confidence,
         client_event_id=client_event_id,
         created_ts=time.time(),
     )
