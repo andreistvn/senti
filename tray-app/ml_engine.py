@@ -103,30 +103,44 @@ class MLEngine:
         Ingests a packet, updates the sliding window, extracts features, 
         and returns the malicious probability score [0.0, 1.0].
         """
+        self.observe(src_mac, op, src_ip, dst_ip)
+        return self.score(src_mac)
+
+    def observe(self, src_mac: str, op: int, src_ip: str, dst_ip: str) -> None:
+        """
+        Add a packet to this MAC's sliding window without scoring it. Used for
+        a MAC just blocked, whose detection confidence is finalized over its
+        full window (see the daemon's finalize_confidence).
+        """
         now = time.time()
-        
         with self.lock:
-            # 1. Record the new packet
             self.history[src_mac].append({
                 'timestamp': now,
                 'op': op,
                 'src_ip': src_ip,
                 'dst_ip': dst_ip
             })
-            
-            # 2. Slide the window: remove packets older than 5 seconds
-            window = self.history[src_mac]
-            while window and (now - window[0]['timestamp']) > self.window_size:
-                window.pop(0)
-                
-            # 3. Wait for sufficient density before scoring
+            self._slide_locked(src_mac, now)
+
+    def _slide_locked(self, src_mac: str, now: float) -> list:
+        """Drop packets older than the window from this MAC's history."""
+        window = self.history[src_mac]
+        while window and (now - window[0]['timestamp']) > self.window_size:
+            window.pop(0)
+        return window
+
+    def score(self, src_mac: str) -> float:
+        """The malicious probability [0.0, 1.0] of this MAC's current window."""
+        with self.lock:
+            window = self._slide_locked(src_mac, time.time())
+
+            # Wait for sufficient density before scoring
             if len(window) < 3 or self.model is None:
                 return 0.0
-                
-            # 4. Extract 8-dimensional feature vector
+
+            # Extract 8-dimensional feature vector
             features = self._extract_features(window)
-            
-        # 5. Execute Inference (outside the history lock if possible, but fine here since model.predict is fast)
+
         try:
             # A DataFrame with the training-time column names avoids sklearn's
             # "X does not have valid feature names" warning on every prediction.
@@ -135,10 +149,9 @@ class MLEngine:
             # predict_proba returns an array of shape (n_samples, n_classes)
             # Typically class 0 is benign, class 1 is malicious
             probs = self.model.predict_proba(X)[0]
-            
+
             # If the model has two classes, return the probability of the positive class
-            score = float(probs[1]) if len(probs) > 1 else 0.0
-            return score
+            return float(probs[1]) if len(probs) > 1 else 0.0
         except Exception as e:
             print(f"[MLEngine] Inference Exception: {e}")
             return 0.0

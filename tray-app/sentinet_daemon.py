@@ -210,6 +210,14 @@ class DaemonState:
             self.enforcer.block(mac)
         return is_new
 
+    def update_confidence(self, mac: str, confidence: str) -> None:
+        """A finalized detection confidence for a MAC already on the blacklist."""
+        with self._lock:
+            meta = self.blacklist_meta.get(mac)
+            if meta is not None:
+                meta["confidence"] = confidence
+        self._notify()
+
     def set_ground_truth(self, macs) -> None:
         """Declare which MACs are the attacker(s); a change starts the tally afresh."""
         declared = {m for m in (normalise_mac(mac) for mac in (macs or [])) if m}
@@ -453,6 +461,10 @@ class CaptureEngine(threading.Thread):
         self.ml_engine = ml_engine
         self.bayanihan_client = bayanihan_client
         self._stop = threading.Event()
+        # MACs Tier 2 has just flagged, whose confidence is still being
+        # finalized: MAC -> {"event": threat_event, "provisional": score}.
+        self._finalizing: Dict[str, Dict[str, Any]] = {}
+        self._finalizing_lock = threading.Lock()
 
     def stop(self) -> None:
         self._stop.set()
@@ -495,6 +507,11 @@ class CaptureEngine(threading.Thread):
                     # (enforcer.py) and this is the sniffer's copy of it; on
                     # other platforms ceasing processing only simulates a block.
                 self.state.score_verdict(src_mac, treated_as_attack=True)
+
+                # Dropped all the same; recorded only so the detection's
+                # confidence can be finalized over a full window.
+                if src_mac in self._finalizing:
+                    self.ml_engine.observe(src_mac, op, src_ip, dst_ip)
 
                 # Surface this — the visible proof that either this agent's own
                 # earlier detection (Tier 1) or another agent's report relayed
@@ -566,10 +583,15 @@ class CaptureEngine(threading.Thread):
                     "clientEventId": str(uuid.uuid4()),
                     "timestamp": now.strftime('%H:%M:%S'),
                     "sourceMac": src_mac,
-                    "attackType": "ARP Spoofing" if score > 0.8 else "Anomalous ARP",
+                    # The model has one attack class, arp_spoofing.
+                    "attackType": "ARP Spoofing",
                     "tier": "Tier 2",
                     "action": "Blocked",
+                    # Provisional: the score at the moment it crossed the
+                    # threshold, so always close to it. Replaced by
+                    # _finalize_confidence one window later.
                     "confidence": f"{score*100:.1f}%",
+                    "confidenceFinal": False,
                     "detectedAtMs": detected_at_ms,
                 }
 
@@ -605,6 +627,39 @@ class CaptureEngine(threading.Thread):
                 self.bayanihan_client.send_attack_report(threat_event)
                 with self.state._lock:
                     self.state.sig_contributions += 1
+
+                with self._finalizing_lock:
+                    self._finalizing[src_mac] = {"event": threat_event, "provisional": score}
+                timer = threading.Timer(self.ml_engine.window_size, self._finalize_confidence, args=(src_mac,))
+                timer.daemon = True
+                timer.start()
+
+    def _finalize_confidence(self, mac: str) -> None:
+        """
+        Settle a detection's confidence one window after it was flagged.
+
+        Tier 2 scores a MAC on every packet and blocks on the first score at or
+        above the threshold, so the score at that moment only says the line was
+        crossed. The MAC's packets go on being recorded (not scored) while
+        Tier 1 drops them, and here the window they fill is scored once. The
+        recorded confidence is the higher of that and the crossing score: an
+        attacker that went quiet after being blocked leaves too little in the
+        window to score.
+        """
+        with self._finalizing_lock:
+            entry = self._finalizing.pop(mac, None)
+        if entry is None:
+            return
+        score = max(entry["provisional"], self.ml_engine.score(mac))
+        confidence = f"{score*100:.1f}%"
+        event = entry["event"]
+        with self.state._lock:
+            event["confidence"] = confidence
+            event["confidenceFinal"] = True
+        self.state.update_confidence(mac, confidence)
+        print(f"[Tier 2] Confidence for {mac} finalized at {confidence} "
+              f"(crossed the threshold at {entry['provisional']*100:.1f}%)")
+        self.bayanihan_client.send_confidence_update(event["clientEventId"], mac, confidence)
 
 _SCENARIO_RANK = {"normal": 0, "poisoning": 1, "flooding": 2}
 
@@ -847,6 +902,7 @@ class SentiNetDaemon:
             agent_info=agent_info,
             recent_events_provider=lambda: self.state.events_tail(20),
             on_ground_truth=self.state.set_ground_truth,
+            on_confidence_update=self.state.update_confidence,
         )
         self.capture = CaptureEngine(self.state, self.ml_engine, self.bayanihan_client)
         self.telemetry = TelemetryEngine(self.state, self.bayanihan_client)

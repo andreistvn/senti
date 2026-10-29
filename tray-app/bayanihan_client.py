@@ -108,6 +108,7 @@ class BayanihanClient:
     """
     def __init__(self, relay_url="http://localhost:8771", on_blacklist_update=None, agent_info=None,
                  on_ground_truth: Optional[Callable[[list], None]] = None,
+                 on_confidence_update: Optional[Callable[[str, str], None]] = None,
                  recent_events_provider: Optional[Callable[[], list]] = None,
                  pending_store_path: str = PENDING_REPORTS_DB_PATH):
         self.relay_url = relay_url
@@ -115,6 +116,9 @@ class BayanihanClient:
         # Called with the attacker MAC(s) declared for this run, which the relay
         # sends on connect — used only to score the live confusion matrix.
         self.on_ground_truth = on_ground_truth
+        # Called with (mac, confidence) when the relay passes on another agent's
+        # finalized detection confidence for a blacklisted MAC.
+        self.on_confidence_update = on_confidence_update
         self.agent_info = agent_info or {}
         # Called at connect time to attach a short tail of this agent's own
         # recent detections to register_agent, so the relay can backfill any
@@ -234,6 +238,13 @@ class BayanihanClient:
                         print(f"[BayanihanClient] Could not report enforcement of {mac}: {exc}")
 
         @self.sio.event
+        def blacklist_confidence(data):
+            mac = (data or {}).get("mac")
+            confidence = (data or {}).get("confidence")
+            if mac and confidence and self.on_confidence_update:
+                self.on_confidence_update(mac, confidence)
+
+        @self.sio.event
         def sop_ground_truth(data):
             if self.on_ground_truth:
                 self.on_ground_truth((data or {}).get("attackerMacs") or [])
@@ -343,6 +354,32 @@ class BayanihanClient:
             f"({client_event_id[:8]}…); {self.pending_count()} pending delivery."
         )
 
+    def send_confidence_update(self, client_event_id: str, mac: str, confidence: str) -> None:
+        """
+        Deliver a detection's finalized confidence (see CaptureEngine's
+        _finalize_confidence). If the report itself has not been delivered yet,
+        the value is written into it instead, so it arrives already final.
+        Otherwise it is sent once; the relay writes the provisional value to the
+        ledger if this never arrives.
+        """
+        with self._pending_lock:
+            item = self._pending.get(client_event_id)
+            if item is not None:
+                item["event"]["confidence"] = confidence
+                item["event"]["confidenceFinal"] = True
+                return
+        if not self.connected:
+            print(f"[BayanihanClient] Not connected; finalized confidence for {mac} not sent.")
+            return
+        try:
+            self.sio.emit("confidence_update", {
+                "clientEventId": client_event_id,
+                "sourceMac": mac,
+                "confidence": confidence,
+            })
+        except Exception as exc:
+            print(f"[BayanihanClient] Could not send finalized confidence for {mac}: {exc}")
+
     def clear_pending(self) -> int:
         """
         Drop every undelivered report, in memory and on disk. Called when the
@@ -406,7 +443,14 @@ class BayanihanClient:
 
             with self._pending_lock:
                 self._pending.pop(client_event_id, None)
+                # Finalized while this delivery was in flight: what the relay
+                # got is the provisional score, so follow it with the final one.
+                finalized_late = (report.get("confidenceFinal") is False
+                                  and item["event"].get("confidenceFinal") is True)
             self._store.remove(client_event_id)
+            if finalized_late:
+                self.send_confidence_update(client_event_id, item["event"].get("sourceMac"),
+                                            item["event"]["confidence"])
             note = " (relay already had it)" if ack.get("duplicate") else ""
             print(
                 f"[BayanihanClient] Report for {item['event'].get('sourceMac')} "
