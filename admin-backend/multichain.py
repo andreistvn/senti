@@ -17,6 +17,7 @@ state.py wires the worker to SQLite through callbacks so this module stays free 
 any database dependency.
 """
 
+import os
 import queue
 import threading
 import time
@@ -41,6 +42,27 @@ from config import (
 
 # MultiChain error codes we treat as "the stream simply isn't there yet".
 _ERR_NOT_FOUND = (-708, -705, -100)
+
+# Experiment log (Table 19): one line per committed ledger write, on the
+# relay's clock, joined to relay_broadcast.csv by event_id. Fresh each run.
+LEDGER_LOG_PATH = os.environ.get("RELAY_LEDGER_LOG", "relay_ledger.csv")
+_ledger_log_lock = threading.Lock()
+if not (os.environ.get("RELAY_LOG_APPEND") == "1"
+        and os.path.exists(LEDGER_LOG_PATH)
+        and os.path.getsize(LEDGER_LOG_PATH) > 0):
+    try:
+        with open(LEDGER_LOG_PATH, "w") as _f:
+            _f.write("event_id,mac,t_blockchain_write_ms,txid\n")
+    except OSError:
+        pass
+
+
+def _log_ledger_write(event_id, mac, txid) -> None:
+    try:
+        with _ledger_log_lock, open(LEDGER_LOG_PATH, "a") as f:
+            f.write(f"{event_id or ''},{mac},{time.time() * 1000:.0f},{txid}\n")
+    except OSError:
+        pass
 
 
 class MultiChainError(RuntimeError):
@@ -330,6 +352,10 @@ class LedgerWorker:
                 'tier': record.get('tier', 'Tier 3'),
                 'action': record.get('action', 'Blocked'),
             })
+            # t_blockchain_write in Table 19: the commit has returned a txid.
+            # Logged on the relay's clock and joined to relay_broadcast.csv by
+            # event_id. Only first detections carry one.
+            _log_ledger_write(record.get('clientEventId'), record['sourceMac'], txid)
         except (MultiChainError, requests.exceptions.RequestException) as exc:
             self._note_failure(exc)
             if item['attempts'] >= MULTICHAIN_MAX_PUBLISH_ATTEMPTS:

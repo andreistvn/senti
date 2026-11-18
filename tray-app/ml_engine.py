@@ -37,14 +37,21 @@ class MLEngine:
     def __init__(self):
         self.window_size = 5.0  # seconds
         self.lock = threading.Lock()
-        
+
         # State: MAC -> list of packet dicts
         self.history = defaultdict(list)
-        
+
+        # Experiment paper Table 17: how long loading the serialized model took,
+        # and the most recent Tier-2 inference latency (set in score()).
+        self.model_load_ms = 0.0
+        self.last_inference_ms = 0.0
+
         print(f"[MLEngine] Loading model from {MODEL_PATH}")
         try:
+            _t = time.perf_counter()
             self.model = joblib.load(MODEL_PATH)
-            print("[MLEngine] Model loaded successfully.")
+            self.model_load_ms = (time.perf_counter() - _t) * 1000
+            print(f"[MLEngine] Model loaded successfully in {self.model_load_ms:.1f} ms.")
         except Exception as e:
             print(f"[MLEngine] WARNING: Failed to load model: {e}")
             self.model = None
@@ -148,7 +155,10 @@ class MLEngine:
 
             # predict_proba returns an array of shape (n_samples, n_classes)
             # Typically class 0 is benign, class 1 is malicious
+            _t = time.perf_counter()
             probs = self.model.predict_proba(X)[0]
+            # Table 17: the model's inference time for this scoring (ms).
+            self.last_inference_ms = (time.perf_counter() - _t) * 1000
 
             # If the model has two classes, return the probability of the positive class
             return float(probs[1]) if len(probs) > 1 else 0.0

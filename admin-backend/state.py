@@ -1206,6 +1206,7 @@ def write_to_multichain(threat_dict: dict) -> bool:
         'tier': threat_dict.get('tier', 'Tier 3'),
         'action': threat_dict.get('action', 'Blocked'),
         'confidence': threat_dict.get('confidence', '99.9%'),
+        'clientEventId': threat_dict.get('clientEventId'),
     })
 
 
@@ -1497,6 +1498,7 @@ def add_threat(source_mac: str, attack_type: str, tier: str, action: str, confid
         'action': db_threat.action,
         'confidence': confidence,
         'detail': db_threat.detail,
+        'clientEventId': client_event_id,
         'isNew': True,
     }
     db.close()
