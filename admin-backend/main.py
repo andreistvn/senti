@@ -20,6 +20,8 @@ Implements the contract endpoints for the admin dashboard:
 """
 
 import asyncio
+import os
+import threading
 import time
 from contextlib import asynccontextmanager
 
@@ -511,6 +513,33 @@ def _agent_delay_ms(sent_at_ms: Any, stamped_at_ms: Any) -> Optional[float]:
     return max(0.0, float(sent_at_ms) - float(stamped_at_ms))
 
 
+# Experiment log (relay side of Table 19): one line per first-detection
+# broadcast, with the Node A -> relay and relay -> broadcast timestamps, all on
+# the relay's own clock. t_blockchain_write is filled in from the ledger log
+# (state.LEDGER_LOG_PATH) by the scorer, joined on event_id. Fresh each run.
+RELAY_BROADCAST_LOG_PATH = os.environ.get("RELAY_BROADCAST_LOG", "relay_broadcast.csv")
+_relay_log_lock = threading.Lock()
+# RELAY_LOG_APPEND=1 keeps the log across relay restarts (SOP 3 batch); delete
+# it before a batch. Default: truncate on each start.
+if not (os.environ.get("RELAY_LOG_APPEND") == "1"
+        and os.path.exists(RELAY_BROADCAST_LOG_PATH)
+        and os.path.getsize(RELAY_BROADCAST_LOG_PATH) > 0):
+    try:
+        with open(RELAY_BROADCAST_LOG_PATH, "w") as _f:
+            _f.write("event_id,mac,t_sent_ms,relay_received_ms,t_ws_push_ms\n")
+    except OSError:
+        pass
+
+
+def _log_broadcast(event_id, mac, t_sent_ms, relay_received_ms, t_ws_push_ms) -> None:
+    sent = f"{t_sent_ms:.0f}" if isinstance(t_sent_ms, (int, float)) else ""
+    try:
+        with _relay_log_lock, open(RELAY_BROADCAST_LOG_PATH, "a") as f:
+            f.write(f"{event_id or ''},{mac},{sent},{relay_received_ms:.0f},{t_ws_push_ms:.0f}\n")
+    except OSError:
+        pass
+
+
 async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str], reporter_name: str,
                                 reporter_mac: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -606,6 +635,10 @@ async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str
     if ttb_event_id:
         update["eventId"] = ttb_event_id
     await sio.emit("blacklist_update", update, skip_sid=reporter_sid)
+    # t_ws_push in Table 19: the relay has handed the broadcast to the socket.
+    if ttb_event_id:
+        _log_broadcast(ttb_event_id, source_mac, data.get("sentAtMs"),
+                       relay_received_ms, time.time() * 1000)
 
     return {"status": "ok", "id": threat_dict["id"], "duplicate": False}
 

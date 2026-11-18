@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import socketio
 import sqlite3
@@ -7,6 +8,31 @@ import time
 import uuid
 from collections import OrderedDict
 from typing import Callable, Optional
+
+# Experiment log (Node B side of Tables 19 and 21): one line per relay-pushed
+# blacklist entry this node enforced, with when the push arrived and when the
+# kernel block was in place. Fresh each run.
+ENFORCE_LOG_PATH = os.environ.get("SENTINET_ENFORCE_LOG", "/tmp/sentinet_enforcements.csv")
+_enforce_log_lock = threading.Lock()
+_LOG_APPEND = os.environ.get("SENTINET_LOG_APPEND") == "1"
+
+
+def _start_enforce_log() -> None:
+    try:
+        if _LOG_APPEND and os.path.exists(ENFORCE_LOG_PATH) and os.path.getsize(ENFORCE_LOG_PATH) > 0:
+            return
+        with open(ENFORCE_LOG_PATH, "w") as f:
+            f.write("event_id,mac,received_at_ms,enforced_at_ms,reported_by\n")
+    except OSError:
+        pass
+
+
+def _log_enforcement(event_id, mac, received_at_ms, enforced_at_ms, reported_by) -> None:
+    try:
+        with _enforce_log_lock, open(ENFORCE_LOG_PATH, "a") as f:
+            f.write(f"{event_id or ''},{mac},{received_at_ms:.0f},{enforced_at_ms:.0f},{reported_by or ''}\n")
+    except OSError:
+        pass
 
 from config import (
     PENDING_REPORTS_DB_PATH,
@@ -127,6 +153,7 @@ class BayanihanClient:
         self.recent_events_provider = recent_events_provider
         self.sio = socketio.Client()
         self.connected = False
+        _start_enforce_log()
 
         self.enabled = False
 
@@ -205,6 +232,9 @@ class BayanihanClient:
 
         @self.sio.event
         def blacklist_update(data):
+            # t_B_received in Table 19 (broadcast latency leg) / arrival of the
+            # threat intelligence at this node. Taken first, before any work.
+            received_at_ms = int(time.time() * 1000)
             print(f"[BayanihanClient] Received blacklist update: {data}")
             mac = data.get("mac")
             if mac and self.on_blacklist_update:
@@ -218,6 +248,10 @@ class BayanihanClient:
                 # t_enforced in Chapter 3's Time-to-Block formula: the moment
                 # this node wrote the attacker's MAC into its Tier-1 blacklist.
                 enforced_at_ms = int(time.time() * 1000)
+
+                if is_new:
+                    _log_enforcement(data.get("eventId"), mac, received_at_ms,
+                                     enforced_at_ms, data.get("reportedBy"))
 
                 # Tell the relay, so it can pair this with the detecting node's
                 # t_detected. Only for a first-detection broadcast (it carries an

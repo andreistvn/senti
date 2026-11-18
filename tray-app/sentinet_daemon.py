@@ -61,6 +61,66 @@ from ipc_protocol import (
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 
+# Experiment log: one line per MAC added to the Tier-1 blacklist, with the time
+# it was added and the time the kernel started dropping it. Used to score SOP 2
+# per window (experiment paper Tables 13-14) and for t_enforced (Table 20).
+# Started fresh each time the daemon starts, so each trial gets its own file.
+BLOCK_LOG_PATH = os.environ.get("SENTINET_BLOCK_LOG", "/tmp/sentinet_blocks.csv")
+_block_log_lock = threading.Lock()
+
+# SOP 3 runs reset the blacklist by restarting the agents between trials, which
+# would truncate these logs each time. With SENTINET_LOG_APPEND=1 the logs are
+# kept and appended across restarts (one row per trial, joined by event id);
+# delete them before starting a batch. Default: truncate per start (SOP 2).
+_LOG_APPEND = os.environ.get("SENTINET_LOG_APPEND") == "1"
+
+
+def _init_log(path: str, header: str) -> None:
+    try:
+        if _LOG_APPEND and os.path.exists(path) and os.path.getsize(path) > 0:
+            return
+        with open(path, "w") as f:
+            f.write(header)
+    except OSError as exc:
+        print(f"[Daemon] Could not create {path}: {exc}", flush=True)
+
+
+def _start_block_log() -> None:
+    _init_log(BLOCK_LOG_PATH, "mac,origin,t_added_ms,t_enforced_ms\n")
+
+
+def _log_block(mac: str, origin: str, t_added_ms: float, t_enforced_ms: Optional[float]) -> None:
+    enforced = f"{t_enforced_ms:.0f}" if t_enforced_ms is not None else ""
+    try:
+        with _block_log_lock, open(BLOCK_LOG_PATH, "a") as f:
+            f.write(f"{mac},{origin},{t_added_ms:.0f},{enforced}\n")
+    except OSError:
+        pass
+
+
+# Experiment log: one line per Tier-2 first detection, with the cold-start
+# measurements for the paper's Table 17 (model load time, inference latency,
+# and how many packets leaked before the block). Joined to the block log by MAC.
+DETECT_LOG_PATH = os.environ.get("SENTINET_DETECT_LOG", "/tmp/sentinet_detections.csv")
+
+
+def _start_detect_log() -> None:
+    _init_log(DETECT_LOG_PATH, "event_id,mac,detected_at_ms,t_added_ms,t_enforced_ms,"
+                               "confidence,model_load_ms,inference_ms,pre_block_packets,"
+                               "window_span_ms\n")
+
+
+def _log_detection(event_id: str, mac: str, detected_at_ms: float, t_added_ms: float,
+                   t_enforced_ms: float, confidence: str, model_load_ms: float,
+                   inference_ms: float, pre_block_packets: int, window_span_ms: float) -> None:
+    try:
+        with _block_log_lock, open(DETECT_LOG_PATH, "a") as f:
+            f.write(f"{event_id},{mac},{detected_at_ms:.0f},{t_added_ms:.0f},"
+                    f"{t_enforced_ms:.0f},{confidence},{model_load_ms:.1f},"
+                    f"{inference_ms:.3f},{pre_block_packets},{window_span_ms:.0f}\n")
+    except OSError:
+        pass
+
 THREAT_LABELS = [
     "ARP Spoofing",
     "MITM Attempt",
@@ -103,6 +163,8 @@ class DaemonState:
         self._lock = threading.Lock()
         self.protected: bool = False
         self.started_at: float = time.time()
+        _start_block_log()
+        _start_detect_log()
         self.protected_since: Optional[float] = None
 
         # Traffic counters
@@ -191,6 +253,7 @@ class DaemonState:
         """
         if self.is_never_block(mac, source=origin):
             return False
+        t_added_ms = time.time() * 1000
         with self._lock:
             is_new = mac not in self.blacklist
             self.blacklist.add(mac)
@@ -206,8 +269,11 @@ class DaemonState:
                     "lastReportedAt": None,
                 }
         # Outside the state lock: this runs a system command.
+        enforced = False
         if is_new and self.enforcer is not None:
-            self.enforcer.block(mac)
+            enforced = self.enforcer.block(mac)
+        if is_new:
+            _log_block(mac, origin, t_added_ms, time.time() * 1000 if enforced else None)
         return is_new
 
     def update_confidence(self, mac: str, confidence: str) -> None:
@@ -598,19 +664,32 @@ class CaptureEngine(threading.Thread):
                 # Counted before the blacklist entry exists: these packets are
                 # known to be malicious only now, and were not blocked.
                 seen_before_block = self.ml_engine.window_count(src_mac)
+                window_span_ms = self.ml_engine.window_span(src_mac) * 1000
                 with self.state._lock:
                     self.state.attack_pre_block += seen_before_block
                     self.state.detection_latency = {
                         "mac": src_mac,
                         "packets": seen_before_block,
-                        "ms": round(self.ml_engine.window_span(src_mac) * 1000),
+                        "ms": round(window_span_ms),
                     }
 
+                # t_added/t_enforced for this node's own block (Table 20 local
+                # response). add_to_blacklist returns once the kernel is
+                # dropping, so the wrap brackets the real enforcement.
+                t_added_ms = time.time() * 1000
                 self.state.add_to_blacklist(
                     src_mac,
                     origin="local",
                     attack_type=threat_event["attackType"],
                     confidence=threat_event["confidence"],
+                )
+                t_enforced_ms = time.time() * 1000
+
+                _log_detection(
+                    threat_event["clientEventId"], src_mac, detected_at_ms,
+                    t_added_ms, t_enforced_ms, threat_event["confidence"],
+                    self.ml_engine.model_load_ms, self.ml_engine.last_inference_ms,
+                    seen_before_block, window_span_ms,
                 )
                 # Undo any poisoning those first packets managed.
                 if self.state.enforcer is not None and self.state.gateway:
