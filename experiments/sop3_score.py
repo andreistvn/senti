@@ -95,6 +95,7 @@ def collect(scen_dirs, attacker):
                 "model_load_ms": g(dr, "model_load_ms"),
                 "inference_ms": g(dr, "inference_ms"),
                 "pre_block": dr.get("pre_block_packets", ""),
+                "window_span": g(dr, "window_span_ms"),
                 "t_sent": g(b, "t_sent_ms"),
                 "relay_received": g(b, "relay_received_ms"),
                 "t_ws_push": g(b, "t_ws_push_ms"),
@@ -111,6 +112,8 @@ def main():
     ap.add_argument("--s2")
     ap.add_argument("--s3")
     ap.add_argument("--out", default=".")
+    ap.add_argument("--relay-unsynced", action="store_true",
+                    help="relay clock is not reliably synced to the Kalis: report Report Upload Time as N/M")
     a = ap.parse_args()
     attacker = a.attacker.lower()
     dirs = {s: d for s, d in (("S2", a.s2), ("S3", a.s3)) if d}
@@ -134,6 +137,7 @@ def main():
         w.writerow([i, r["scenario"], "Yes" if r["correct"] else "No", r["confidence"],
                     f(r["model_load_ms"] / 1000, 3) if r["model_load_ms"] else "",
                     f(r["inference_ms"], 3), f(p, 3), r["pre_block"]])
+    summarise(w, "Model load (s)", [r["model_load_ms"] / 1000 if r["model_load_ms"] else None for r in rows], 3)
     summarise(w, "Inference (ms)", [r["inference_ms"] for r in rows], 3)
     summarise(w, "Population (s)", pop, 3)
 
@@ -141,30 +145,35 @@ def main():
     w = W("Table19_Latency.csv")
     w.writerow(["Trial", "Scenario", "t_sent (ms)", "Relay t_received (ms)",
                 "Report Upload Time (ms)", "t_blockchain_write (ms)", "t_ws_push (ms)",
-                "Node B t_received (ms)", "Broadcast Latency (ms)", "Total Propagation Time (ms)"])
-    upload, bcast, prop = [], [], []
+                "Node B t_received (ms)", "Broadcast Latency (ms)", "Total Propagation Time (ms)",
+                "Relay Processing (ms)"])
+    upload, bcast, prop, relay_proc = [], [], [], []
     for i, r in enumerate(rows, 1):
-        up = r["relay_received"] - r["t_sent"] if r["relay_received"] and r["t_sent"] else None
+        up = r["relay_received"] - r["t_sent"] if r["relay_received"] and r["t_sent"] and not a.relay_unsynced else None
+        rp = r["t_ws_push"] - r["relay_received"] if r["t_ws_push"] and r["relay_received"] else None
+        relay_proc.append(rp)
         bl = abs(r["t_ws_push"] - r["t_blockchain_write"]) if r["t_ws_push"] and r["t_blockchain_write"] else None
         tp = r["nodeB_received"] - r["t_sent"] if r["nodeB_received"] and r["t_sent"] else None
         upload.append(up); bcast.append(bl); prop.append(tp)
-        w.writerow([i, r["scenario"], f(r["t_sent"], 0), f(r["relay_received"], 0), f(up),
+        w.writerow([i, r["scenario"], f(r["t_sent"], 0), f(r["relay_received"], 0), "N/M" if a.relay_unsynced else f(up),
                     f(r["t_blockchain_write"], 0), f(r["t_ws_push"], 0), f(r["nodeB_received"], 0),
-                    f(bl), f(tp)])
+                    f(bl), f(tp), f(rp)])
     summarise(w, "Report Upload", upload)
     summarise(w, "Broadcast Latency", bcast)
     summarise(w, "Total Propagation", prop)
+    summarise(w, "Relay Processing", relay_proc)
 
     # ── Table 20: Local Threat Response Time (same-node) ──
     w = W("Table20_LocalResponse.csv")
     w.writerow(["Trial", "Scenario", "SentiNet t_detected (ms)", "SentiNet t_enforced (ms)",
-                "SentiNet Response Time (ms)", "Trad. IDPS Response Time (ms)"])
+                "SentiNet Response Time (ms)", "Trad. IDPS Response Time (ms)",
+                "SentiNet First-Packet-to-Block (ms)"])
     trad = {}
     for scen, d in dirs.items():
         for r in load(os.path.join(d, "tradA_blocks.csv")):
             if r.get("response_ms"):
                 trad.setdefault(scen, []).append(float(r["response_ms"]))
-    sent_resp, trad_resp = [], []
+    sent_resp, trad_resp, onset = [], [], []
     ti = {s: 0 for s in dirs}
     for i, r in enumerate(rows, 1):
         resp = r["t_enforced_local"] - r["detected_at"] if r["t_enforced_local"] and r["detected_at"] else None
@@ -174,9 +183,14 @@ def main():
         if ti[r["scenario"]] < len(lst):
             tr = lst[ti[r["scenario"]]]; ti[r["scenario"]] += 1
         trad_resp.append(tr)
-        w.writerow([i, r["scenario"], f(r["detected_at"], 0), f(r["t_enforced_local"], 0), f(resp), f(tr)])
+        # Snort times from the alerting packet; SentiNet decides after its window.
+        # Span + response puts SentiNet on the same first-packet starting point.
+        on = resp + r["window_span"] if resp is not None and r["window_span"] is not None else None
+        onset.append(on)
+        w.writerow([i, r["scenario"], f(r["detected_at"], 0), f(r["t_enforced_local"], 0), f(resp), f(tr), f(on)])
     summarise(w, "SentiNet Response", sent_resp)
     summarise(w, "Trad. Response", trad_resp)
+    summarise(w, "SentiNet First-Packet-to-Block", onset)
 
     # ── Table 21: Cross-Node Time-to-Block ──
     w = W("Table21_CrossNodeTTB.csv")
