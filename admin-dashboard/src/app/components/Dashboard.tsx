@@ -2,8 +2,12 @@ import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { toast, Toaster } from 'sonner';
 import ThreatAnalyticsTab from './ThreatAnalyticsTab';
 import SopTab from './SopTab';
+import DetectionLogsTab from './DetectionLogsTab';
+import ReportsTab from './ReportsTab';
 import { getAdminDashboardSeed, getAdminDashboardSeedFallback } from '../lib/adminApi';
 import type { AdminBlacklistEntry, AdminPolicyConfig } from '../lib/adminApi';
+import { confidenceColor, confidenceLegend } from '../lib/confidence';
+import { InfoHint } from './InfoHint';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +31,7 @@ interface Agent {
 interface LogEntry    { id: number; timestamp: string; message: string; }
 interface LedgerEntry { blockId: string; timestamp: string; macHash: string; score: string; }
 
-type Tab = 'dashboard' | 'analytics' | 'sop';
+type Tab = 'dashboard' | 'analytics' | 'detection' | 'sop' | 'reports';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -83,6 +87,9 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
 
 
   const [policyConfig, setPolicyConfig] = useState<AdminPolicyConfig>(adminSeed.policyConfig);
+
+  // The ML decision line, as a 0–100 percentage, used to colour confidence values.
+  const thresholdPct = (policyConfig.mlThreshold ?? 0.5) * 100;
 
   const logsContainerRef = useRef<HTMLDivElement>(null);
   const ledgerContainerRef = useRef<HTMLDivElement>(null);
@@ -200,7 +207,9 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
   const TABS: { key: Tab; label: string }[] = [
     { key: 'dashboard', label: 'Dashboard' },
     { key: 'analytics', label: 'Analytics' },
+    { key: 'detection', label: 'Detection Logs' },
     { key: 'sop',       label: 'SOP' },
+    { key: 'reports',   label: 'Reports' },
   ];
 
   return (
@@ -247,8 +256,24 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
         <ThreatAnalyticsTab />
       )}
 
+      {/* ── Detection Logs Tab ── */}
+      {activeTab === 'detection' && (
+        <DetectionLogsTab logs={logs} blacklist={blacklist} thresholdPct={thresholdPct} />
+      )}
+
       {/* ── SOP Tab ── */}
       {activeTab === 'sop' && <SopTab />}
+
+      {/* ── Reports Tab ── */}
+      {activeTab === 'reports' && (
+        <ReportsTab
+          logs={logs}
+          blacklist={blacklist}
+          blockchainMetrics={blockchainMetrics}
+          connectedAgents={blockchainMetrics.connectedAgents}
+          thresholdPct={thresholdPct}
+        />
+      )}
 
       {/* ── Dashboard Tab ── */}
       {activeTab === 'dashboard' && <>
@@ -399,7 +424,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                     <th className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">BlockChain ID</th>
                     <th className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">Timestamp</th>
                     <th className="p-3 border-r border-[#e2e8f0] font-bold text-[#0F172A]">Source MAC Hash</th>
-                    <th className="p-3 font-bold text-[#0F172A]">Confidence</th>
+                    <th className="p-3 font-bold text-[#0F172A]">Confidence<InfoHint text={confidenceLegend(thresholdPct)} /></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -408,7 +433,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                       <td className="p-3 border-r border-[#e2e8f0]">{row.blockId}</td>
                       <td className="p-3 border-r border-[#e2e8f0]">{row.timestamp}</td>
                       <td className="p-3 border-r border-[#e2e8f0] font-bold">{row.macHash}</td>
-                      <td className="p-3 text-[#16A34A] font-bold">{row.score}</td>
+                      <td className="p-3 font-bold" style={{ color: confidenceColor(row.score, thresholdPct) }}>{row.score}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -437,7 +462,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                     <th className="text-left p-3 border-r border-[#e2e8f0]">Source MAC</th>
                     <th className="text-left p-3 border-r border-[#e2e8f0]">First Seen</th>
                     <th className="text-left p-3 border-r border-[#e2e8f0]">Reported By</th>
-                    <th className="text-left p-3">Confidence</th>
+                    <th className="text-left p-3">Confidence<InfoHint text={confidenceLegend(thresholdPct)} /></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -446,7 +471,7 @@ export default function Dashboard({ onLogout }: { onLogout: () => void }) {
                       <td className="p-3 border-r border-[#e2e8f0] font-bold font-['JetBrains_Mono',_monospace]">{b.mac}</td>
                       <td className="p-3 border-r border-[#e2e8f0] font-['JetBrains_Mono',_monospace]">{b.firstSeen}</td>
                       <td className="p-3 border-r border-[#e2e8f0]">{b.reportedBy}</td>
-                      <td className="p-3 font-['JetBrains_Mono',_monospace] text-[#1a73e8]">{b.confidence}</td>
+                      <td className="p-3 font-['JetBrains_Mono',_monospace] font-bold" style={{ color: confidenceColor(b.confidence, thresholdPct) }}>{b.confidence}</td>
                     </tr>
                   ))}
                 </tbody>

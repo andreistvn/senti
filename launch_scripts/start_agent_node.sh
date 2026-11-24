@@ -175,6 +175,7 @@ fi
     # sudo resets the environment and PATH, so pass the relay URL through `env` and
     # resolve python3 to the venv interpreter before privileges are dropped in.
     sudo -b env SENTINET_RELAY_URL="$RELAY_URL" \
+        SENTINET_LOG_APPEND="${SENTINET_LOG_APPEND:-}" \
         "$(command -v python3)" sentinet_daemon.py > /tmp/sentinet_daemon.log 2>&1
 )
 

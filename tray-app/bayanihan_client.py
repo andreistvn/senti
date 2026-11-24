@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import socketio
 import sqlite3
@@ -7,6 +8,31 @@ import time
 import uuid
 from collections import OrderedDict
 from typing import Callable, Optional
+
+# Experiment log (Node B side of Tables 19 and 21): one line per relay-pushed
+# blacklist entry this node enforced, with when the push arrived and when the
+# kernel block was in place. Fresh each run.
+ENFORCE_LOG_PATH = os.environ.get("SENTINET_ENFORCE_LOG", "/tmp/sentinet_enforcements.csv")
+_enforce_log_lock = threading.Lock()
+_LOG_APPEND = os.environ.get("SENTINET_LOG_APPEND") == "1"
+
+
+def _start_enforce_log() -> None:
+    try:
+        if _LOG_APPEND and os.path.exists(ENFORCE_LOG_PATH) and os.path.getsize(ENFORCE_LOG_PATH) > 0:
+            return
+        with open(ENFORCE_LOG_PATH, "w") as f:
+            f.write("event_id,mac,received_at_ms,enforced_at_ms,reported_by\n")
+    except OSError:
+        pass
+
+
+def _log_enforcement(event_id, mac, received_at_ms, enforced_at_ms, reported_by) -> None:
+    try:
+        with _enforce_log_lock, open(ENFORCE_LOG_PATH, "a") as f:
+            f.write(f"{event_id or ''},{mac},{received_at_ms:.0f},{enforced_at_ms:.0f},{reported_by or ''}\n")
+    except OSError:
+        pass
 
 from config import (
     PENDING_REPORTS_DB_PATH,
@@ -108,6 +134,7 @@ class BayanihanClient:
     """
     def __init__(self, relay_url="http://localhost:8771", on_blacklist_update=None, agent_info=None,
                  on_ground_truth: Optional[Callable[[list], None]] = None,
+                 on_confidence_update: Optional[Callable[[str, str], None]] = None,
                  recent_events_provider: Optional[Callable[[], list]] = None,
                  pending_store_path: str = PENDING_REPORTS_DB_PATH):
         self.relay_url = relay_url
@@ -115,6 +142,9 @@ class BayanihanClient:
         # Called with the attacker MAC(s) declared for this run, which the relay
         # sends on connect — used only to score the live confusion matrix.
         self.on_ground_truth = on_ground_truth
+        # Called with (mac, confidence) when the relay passes on another agent's
+        # finalized detection confidence for a blacklisted MAC.
+        self.on_confidence_update = on_confidence_update
         self.agent_info = agent_info or {}
         # Called at connect time to attach a short tail of this agent's own
         # recent detections to register_agent, so the relay can backfill any
@@ -123,6 +153,7 @@ class BayanihanClient:
         self.recent_events_provider = recent_events_provider
         self.sio = socketio.Client()
         self.connected = False
+        _start_enforce_log()
 
         self.enabled = False
 
@@ -201,6 +232,9 @@ class BayanihanClient:
 
         @self.sio.event
         def blacklist_update(data):
+            # t_B_received in Table 19 (broadcast latency leg) / arrival of the
+            # threat intelligence at this node. Taken first, before any work.
+            received_at_ms = int(time.time() * 1000)
             print(f"[BayanihanClient] Received blacklist update: {data}")
             mac = data.get("mac")
             if mac and self.on_blacklist_update:
@@ -214,6 +248,10 @@ class BayanihanClient:
                 # t_enforced in Chapter 3's Time-to-Block formula: the moment
                 # this node wrote the attacker's MAC into its Tier-1 blacklist.
                 enforced_at_ms = int(time.time() * 1000)
+
+                if is_new:
+                    _log_enforcement(data.get("eventId"), mac, received_at_ms,
+                                     enforced_at_ms, data.get("reportedBy"))
 
                 # Tell the relay, so it can pair this with the detecting node's
                 # t_detected. Only for a first-detection broadcast (it carries an
@@ -232,6 +270,13 @@ class BayanihanClient:
                         })
                     except Exception as exc:
                         print(f"[BayanihanClient] Could not report enforcement of {mac}: {exc}")
+
+        @self.sio.event
+        def blacklist_confidence(data):
+            mac = (data or {}).get("mac")
+            confidence = (data or {}).get("confidence")
+            if mac and confidence and self.on_confidence_update:
+                self.on_confidence_update(mac, confidence)
 
         @self.sio.event
         def sop_ground_truth(data):
@@ -343,6 +388,32 @@ class BayanihanClient:
             f"({client_event_id[:8]}…); {self.pending_count()} pending delivery."
         )
 
+    def send_confidence_update(self, client_event_id: str, mac: str, confidence: str) -> None:
+        """
+        Deliver a detection's finalized confidence (see CaptureEngine's
+        _finalize_confidence). If the report itself has not been delivered yet,
+        the value is written into it instead, so it arrives already final.
+        Otherwise it is sent once; the relay writes the provisional value to the
+        ledger if this never arrives.
+        """
+        with self._pending_lock:
+            item = self._pending.get(client_event_id)
+            if item is not None:
+                item["event"]["confidence"] = confidence
+                item["event"]["confidenceFinal"] = True
+                return
+        if not self.connected:
+            print(f"[BayanihanClient] Not connected; finalized confidence for {mac} not sent.")
+            return
+        try:
+            self.sio.emit("confidence_update", {
+                "clientEventId": client_event_id,
+                "sourceMac": mac,
+                "confidence": confidence,
+            })
+        except Exception as exc:
+            print(f"[BayanihanClient] Could not send finalized confidence for {mac}: {exc}")
+
     def clear_pending(self) -> int:
         """
         Drop every undelivered report, in memory and on disk. Called when the
@@ -406,7 +477,14 @@ class BayanihanClient:
 
             with self._pending_lock:
                 self._pending.pop(client_event_id, None)
+                # Finalized while this delivery was in flight: what the relay
+                # got is the provisional score, so follow it with the final one.
+                finalized_late = (report.get("confidenceFinal") is False
+                                  and item["event"].get("confidenceFinal") is True)
             self._store.remove(client_event_id)
+            if finalized_late:
+                self.send_confidence_update(client_event_id, item["event"].get("sourceMac"),
+                                            item["event"]["confidence"])
             note = " (relay already had it)" if ack.get("duplicate") else ""
             print(
                 f"[BayanihanClient] Report for {item['event'].get('sourceMac')} "

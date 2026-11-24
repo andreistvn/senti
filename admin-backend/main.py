@@ -20,6 +20,8 @@ Implements the contract endpoints for the admin dashboard:
 """
 
 import asyncio
+import os
+import threading
 import time
 from contextlib import asynccontextmanager
 
@@ -105,6 +107,16 @@ class ThreatLogResponse(BaseModel):
     id: int
     timestamp: str
     message: str
+    # The same detection as separate fields, so the Detection Logs and Reports
+    # tabs need not parse `message` back apart.
+    tier: Optional[str] = None
+    attackType: Optional[str] = None
+    sourceMac: Optional[str] = None
+    action: Optional[str] = None
+    detail: Optional[str] = None
+    confidence: Optional[str] = None
+    # Epoch seconds when the relay received it; `timestamp` has no date.
+    createdTs: Optional[float] = None
 
 
 class LedgerResponse(BaseModel):
@@ -262,7 +274,14 @@ async def list_threats(sentinet_admin_session: Optional[str] = Cookie(None)):
             message=(
                 f"[{t['tier']}] {t['attackType']} from {t['sourceMac']}. Action: {t['action']}"
                 + (f" - {t['detail']}" if t.get('detail') else "")
-            )
+            ),
+            tier=t['tier'],
+            attackType=t['attackType'],
+            sourceMac=t['sourceMac'],
+            action=t['action'],
+            detail=t['detail'],
+            confidence=t['confidence'],
+            createdTs=t['createdTs'],
         )
         for t in threats
     ]
@@ -494,6 +513,33 @@ def _agent_delay_ms(sent_at_ms: Any, stamped_at_ms: Any) -> Optional[float]:
     return max(0.0, float(sent_at_ms) - float(stamped_at_ms))
 
 
+# Experiment log (relay side of Table 19): one line per first-detection
+# broadcast, with the Node A -> relay and relay -> broadcast timestamps, all on
+# the relay's own clock. t_blockchain_write is filled in from the ledger log
+# (state.LEDGER_LOG_PATH) by the scorer, joined on event_id. Fresh each run.
+RELAY_BROADCAST_LOG_PATH = os.environ.get("RELAY_BROADCAST_LOG", "relay_broadcast.csv")
+_relay_log_lock = threading.Lock()
+# RELAY_LOG_APPEND=1 keeps the log across relay restarts (SOP 3 batch); delete
+# it before a batch. Default: truncate on each start.
+if not (os.environ.get("RELAY_LOG_APPEND") == "1"
+        and os.path.exists(RELAY_BROADCAST_LOG_PATH)
+        and os.path.getsize(RELAY_BROADCAST_LOG_PATH) > 0):
+    try:
+        with open(RELAY_BROADCAST_LOG_PATH, "w") as _f:
+            _f.write("event_id,mac,t_sent_ms,relay_received_ms,t_ws_push_ms\n")
+    except OSError:
+        pass
+
+
+def _log_broadcast(event_id, mac, t_sent_ms, relay_received_ms, t_ws_push_ms) -> None:
+    sent = f"{t_sent_ms:.0f}" if isinstance(t_sent_ms, (int, float)) else ""
+    try:
+        with _relay_log_lock, open(RELAY_BROADCAST_LOG_PATH, "a") as f:
+            f.write(f"{event_id or ''},{mac},{sent},{relay_received_ms:.0f},{t_ws_push_ms:.0f}\n")
+    except OSError:
+        pass
+
+
 async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str], reporter_name: str,
                                 reporter_mac: Optional[str] = None) -> Dict[str, Any]:
     """
@@ -515,21 +561,29 @@ async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str
     if not source_mac:
         return {"status": "error", "detail": "missing sourceMac"}
 
-    attack_type = data.get("attackType", "Anomalous ARP")
+    attack_type = data.get("attackType", "ARP Spoofing")
     tier = data.get("tier", "Tier 2")
     action = data.get("action", "Blocked")
     confidence = data.get("confidence", "99.9%")
     detail = data.get("detail")
     client_event_id = data.get("clientEventId")
+    # A Tier-2 report sent at the moment of detection carries the score at the
+    # threshold crossing; the agent follows it with the final one
+    # (confidence_update). Agents that predate this send no flag: final.
+    provisional = data.get("confidenceFinal") is False and bool(client_event_id)
 
     try:
         threat_dict = state.add_threat(
             source_mac, attack_type, tier, action, confidence,
             detail=detail, client_event_id=client_event_id,
+            defer_ledger=provisional,
         )
     except Exception as exc:
         print(f"[WebSocket] Failed to record attack report from {reporter_name}: {exc}")
         return {"status": "error", "detail": str(exc)}
+
+    if provisional and threat_dict.get('isNew', True):
+        asyncio.create_task(_ledger_fallback(client_event_id))
 
     if not threat_dict.get('isNew', True):
         # Already have this exact report (agent retry, or a backfill re-offering
@@ -581,8 +635,42 @@ async def _ingest_attack_report(data: Dict[str, Any], reporter_sid: Optional[str
     if ttb_event_id:
         update["eventId"] = ttb_event_id
     await sio.emit("blacklist_update", update, skip_sid=reporter_sid)
+    # t_ws_push in Table 19: the relay has handed the broadcast to the socket.
+    if ttb_event_id:
+        _log_broadcast(ttb_event_id, source_mac, data.get("sentAtMs"),
+                       relay_received_ms, time.time() * 1000)
 
     return {"status": "ok", "id": threat_dict["id"], "duplicate": False}
+
+
+# How long the relay waits for a detection's finalized confidence before
+# writing the provisional one to the ledger. The agent sends it one 5-second
+# window after detection.
+CONFIDENCE_LEDGER_TIMEOUT_S = 15
+
+
+async def _ledger_fallback(client_event_id: str) -> None:
+    await asyncio.sleep(CONFIDENCE_LEDGER_TIMEOUT_S)
+    if state.flush_deferred_ledger(client_event_id):
+        print(f"[WebSocket] No finalized confidence for {client_event_id[:8]}…; "
+              f"ledger written with the provisional score.")
+
+
+@sio.event
+async def confidence_update(sid, data):
+    """An agent's finalized confidence for a Tier-2 detection it reported."""
+    client_event_id = (data or {}).get("clientEventId")
+    confidence = (data or {}).get("confidence")
+    if not client_event_id or not confidence:
+        return
+    result = state.finalize_threat_confidence(client_event_id, confidence)
+    if result is None:
+        print(f"[WebSocket] confidence_update for unknown detection {client_event_id[:8]}…")
+        return
+    print(f"[WebSocket] Confidence for {result['mac']} finalized at {confidence}")
+    # Agents that took the MAC from the broadcast hold the provisional value.
+    if result['blacklistUpdated']:
+        await sio.emit("blacklist_confidence", {"mac": result['mac'], "confidence": confidence}, skip_sid=sid)
 
 
 @sio.event

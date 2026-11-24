@@ -35,3 +35,13 @@ TOOL_DEFENSE_DEMO.md
 # Relay administrator accounts (hashed passwords) — each relay creates its own
 admin-backend/admin_credentials.json
 admin-backend/admin_credentials.json.tmp
+
+# SentiNet runtime experiment logs (generated at run time)
+relay_broadcast.csv
+relay_ledger.csv
+admin-backend/relay_broadcast.csv
+admin-backend/relay_ledger.csv
+experiments/sop1_results/
+experiments/sop2_results/
+experiments/sop2_invalid/
+experiments/sop3_results/
