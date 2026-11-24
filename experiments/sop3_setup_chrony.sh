@@ -39,5 +39,5 @@ echo
 echo "Done. Re-run 'chronyc tracking' just before a session and record the"
 echo "'System time' offset for each node (Table 18). Keep it well under the"
 echo "paper's 1 ms only if you can; over Wi-Fi a few ms is realistic — note the"
-echo "actual value rather than forcing it, since cross-node TTB is computed on"
-echo "the relay's own clock and does not depend on it."
+echo "actual value rather than forcing it. Cross-node TTB subtracts Kali A's clock"
+echo "from Kali B's, so its error is at least the offset between those two nodes."
